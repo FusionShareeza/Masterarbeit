@@ -17,6 +17,12 @@ import itertools
 import functools
 import operator 
 from more_itertools import flatten
+from sqlalchemy.engine import URL
+from sqlalchemy import create_engine
+
+import sqlalchemy as sa
+import urllib
+from sqlalchemy import text
 from collections import Counter
 #config vars
 pd.options.display.max_columns=1000
@@ -25,23 +31,29 @@ pd.options.display.max_seq_items = 100
 verbose=1
 tenant = '0001ai'
 
-def connect_to_db(connection_string,
+def connect_to_db_better(connection_string,
                     database,
                     driver = 'SQL Server Native Client 11.0',
                     user = 'CCAdmin',
                     password = 'Miw6RjnTGmPHLYF9mG1o'
 ):
-    connection = pyodbc.connect("Driver={"+driver+"};"
-                        "Server="+connection_string+";"
-                        "Database="+database+";"
-                        "uid="+user+";pwd="+password+"")
-    return connection
+    odbc_str = 'DRIVER='+driver+';SERVER='+connection_string+';PORT=1433;UID='+user+';DATABASE='+ database + ';PWD='+ password
+    connect_str = 'mssql+pyodbc:///?odbc_connect=' + urllib.parse.quote_plus(odbc_str)
 
-def get_table_data(table_name, connection):
-    query = "SELECT * FROM {}".format(table_name)
-    df = pd.read_sql_query(query, connection)
+    return connect_str
 
-    return df
+
+def get_table_data_CCLOG(table_name, connect_str, startdate, enddate):
+    engine = create_engine(connect_str)
+    with engine.connect() as conn:
+        df = pd.read_sql(text("SELECT * FROM [dbo].["+table_name+"] where LogTime >= "+startdate+" and LogTime <= "+enddate+''""), conn)
+        return df
+
+def get_table_data_ALL(table_name, connect_str):
+    engine = create_engine(connect_str)
+    with engine.connect() as conn:
+        df = pd.read_sql(text("SELECT * FROM [dbo].["+table_name+"]"), conn)
+        return df
 
 
 def split_datframe_into_whatever(splitkey, df_new):
@@ -298,10 +310,12 @@ def sort_numbers_by_position(df, sollwerte_transposed ,col_name, threshold):
 sollwerte = pd.read_csv('data/sollwerte.csv', encoding='utf-8')
 sollwerte_transposed = sollwerte.set_index('Unnamed: 0').T
 
-df_table_cclogattributes = get_table_data('CCLogAttributes', connect_to_db(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''))
+startdate = "'2022-12-20 09:44:23.030'"
+enddate = "'2023-04-19 12:28:20.000'"
 
-df_table_cclogattributes = df_table_cclogattributes.drop(['Zone','Attribute_DataType','LogTimeTicks'], axis=1)
-
+df_table_cclogattributes = get_table_data_CCLOG('CCLogAttributes', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+'')
+                                           ,""+startdate+"",""+enddate+"")
+df_table_cclogattributes = df_table_cclogattributes.drop(['Zone','LogTime','Attribute_DataType','LogTimeTicks'], axis=1)
 df_table_cclogattributes = df_table_cclogattributes.replace('\n',' ', regex=True)
 df_table_cclogattributes = df_table_cclogattributes.replace('\r',' ', regex=True)
 #df_table_cclogattributes.to_csv('data/cclogattributes_T_'+tenant+'.csv', index=False, header= True, encoding='utf-8')#iso-8859-15
@@ -309,13 +323,13 @@ df_table_cclogattributes = df_table_cclogattributes.replace('\r',' ', regex=True
 
 #df1 = pd.read_csv('data/cclogattributes_T_'+tenant+'.csv', encoding='utf-8')
 
-df_new = filter_df_by_time(df_table_cclogattributes,'2022-12-20 09:44:23.030','2023-04-19 12:28:20.000')
+#df_new = filter_df_by_time(df_table_cclogattributes,'2022-12-20 09:44:23.030','2023-04-19 12:28:20.000')
 
 score_card = pd.Series([],dtype=pd.StringDtype())
 sollwerte = pd.read_csv('data/sollwerte.csv', encoding='utf-8')
 sollwerte_transposed = sollwerte.set_index('Unnamed: 0').T
 
-df_results_debitor,df_results_frequency ,dc_sorted_df_debitor = get_data_values_complete_results(tenant, 'DEBITOR_NUM', df_new)
+df_results_debitor,df_results_frequency ,dc_sorted_df_debitor = get_data_values_complete_results(tenant, 'DEBITOR_NUM', df_table_cclogattributes)
 outliers_results = get_outliers(df_results_debitor)
 outliers_results_sorted_debitor = sort_outliers(outliers_results, df_results_frequency)
 outliers_results_debitor_frame = outliers_results_sorted_debitor.to_frame()
@@ -331,7 +345,7 @@ for entry in high_frequency_numbers_debitor:
     bad_vendors.append(high_frequency_numbers_vendor)
     score_card[entry]  = high_frequency_numbers_vendor
     
-df_table_ccvendors = get_table_data('CC_VENDORS', connect_to_db(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''))
+df_table_ccvendors = get_table_data_ALL('CC_VENDORS', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''))
 df_table_ccvendors = df_table_ccvendors.replace('\n',' ', regex=True)
 df_table_ccvendors = df_table_ccvendors.replace('\r',' ', regex=True)
 
