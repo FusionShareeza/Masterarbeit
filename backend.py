@@ -19,6 +19,8 @@ import operator
 from more_itertools import flatten
 from sqlalchemy.engine import URL
 from sqlalchemy import create_engine
+from json import dumps
+from flask_jsonpify import jsonify
 
 import sqlalchemy as sa
 import urllib
@@ -250,7 +252,7 @@ def get_data_values_complete_results(tenant, splitkey,df_new):
 def first_element(row):
     return row[0]
 
-def get_outliers(df_results):
+def get_outliers(df_results, sollwerte_transposed):
     outliers_dataframe = pd.Series([],dtype=pd.StringDtype())
 
     for col in sollwerte_transposed:
@@ -305,61 +307,119 @@ def sort_numbers_by_position(df, sollwerte_transposed ,col_name, threshold):
     
     return sorted_numbers, threshold_numbers
 
+def check_for_eap_error(vendor_num, debitor, dc_sorted_df_vendor_complete):  
+        df_sort = dc_sorted_df_vendor_complete[debitor][vendor_num]
+        df_sort = df_sort[((df_sort['Attribute_Name'] == 'VatAmount1') & (df_sort['Delta'] == True)) | (df_sort['Attribute_Name'] == 'NetAmount1') & (df_sort['Delta'] == True) | (df_sort['Attribute_Name'] == 'VatRate1') & (df_sort['Delta'] == True)]
+
+        if vendor_num == 'd-velop':
+                count_good = df_sort['DocumentID'].nunique()
+                count_good += count_good
+        
+        unique_documentid = df_sort['DocumentID'].unique()
+        wrong_documentids = []
+
+        for entry in unique_documentid:
+                sorted_by_documentid = df_sort.loc[(df_sort["DocumentID"] == entry)]
+                len_sorted_by_documentid = len(sorted_by_documentid)
+                sorted_by_documentid = sorted_by_documentid.loc[(sorted_by_documentid["Attribute_Name"] == 'VatAmount1')]
+                if not sorted_by_documentid.empty:
+                        if 0.0 < abs(float(sorted_by_documentid["Attribute_After"]) - float(sorted_by_documentid["Attribute_Before"])) <= 0.05:
+                                #print('Bei: '+entry+' Rundungsfehler')
+                                x=1
+
+                if not sorted_by_documentid.empty:
+                        wrong_documentids.append([entry, len_sorted_by_documentid])
+
+        return wrong_documentids
+
+def get_improvement_results():
+    sollwerte = pd.read_csv('data/sollwerte.csv', encoding='utf-8')
+    sollwerte_transposed = sollwerte.set_index('Unnamed: 0').T
+
+    startdate = "'2022-12-20 09:44:23.030'"
+    enddate = "'2023-04-19 12:28:20.000'"
+
+    df_table_cclogattributes = get_table_data_CCLOG('CCLogAttributes', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+'')
+                                            ,""+startdate+"",""+enddate+"")
+    df_table_cclogattributes = df_table_cclogattributes.drop(['Zone','LogTime','Attribute_DataType','LogTimeTicks'], axis=1)
+    df_table_cclogattributes = df_table_cclogattributes.replace('\n',' ', regex=True)
+    df_table_cclogattributes = df_table_cclogattributes.replace('\r',' ', regex=True)
+
+    score_card = pd.Series([],dtype=pd.StringDtype())
+    sollwerte = pd.read_csv('data/sollwerte.csv', encoding='utf-8')
+    sollwerte_transposed = sollwerte.set_index('Unnamed: 0').T
+    dc_sorted_df_vendor_complete = dict()
 
 
-sollwerte = pd.read_csv('data/sollwerte.csv', encoding='utf-8')
-sollwerte_transposed = sollwerte.set_index('Unnamed: 0').T
+    df_results_debitor,df_results_frequency ,dc_sorted_df_debitor = get_data_values_complete_results(tenant, 'DEBITOR_NUM', df_table_cclogattributes)
+    outliers_results = get_outliers(df_results_debitor, sollwerte_transposed)
+    outliers_results_sorted_debitor = sort_outliers(outliers_results, df_results_frequency)
+    outliers_results_debitor_frame = outliers_results_sorted_debitor.to_frame()
+    sorted_counts, high_frequency_numbers_debitor = sort_numbers_by_position(outliers_results_debitor_frame, sollwerte_transposed,0, threshold=3)
 
-startdate = "'2022-12-20 09:44:23.030'"
-enddate = "'2023-04-19 12:28:20.000'"
+    bad_vendors = []
+    for entry in high_frequency_numbers_debitor:
+        dc_sorted_df_vendor_complete[entry] = {}
+        df_results_vendor, df_results_frequency_vendor, dc_sorted_df_vendor = get_data_values_complete_results(tenant, 'VENDOR_NUM', dc_sorted_df_debitor[entry])
+        dc_sorted_df_vendor_complete[entry].update(dc_sorted_df_vendor)
+        outliers_results_vendor = get_outliers(df_results_vendor, sollwerte_transposed)
+        outliers_results_sorted_vendor = sort_outliers(outliers_results_vendor, df_results_frequency_vendor)
+        outliers_results_vendor_frame = outliers_results_sorted_vendor.to_frame()
+        sorted_counts_vendor, high_frequency_numbers_vendor = sort_numbers_by_position(outliers_results_vendor_frame, sollwerte_transposed, 0, threshold=3)
+        bad_vendors.append(high_frequency_numbers_vendor)
+        score_card[entry]  = high_frequency_numbers_vendor
+        
+    df_table_ccvendors = get_table_data_ALL('CC_VENDORS', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''))
+    df_table_ccvendors_bank = get_table_data_ALL('CC_VENDOR_BANK', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''))
 
-df_table_cclogattributes = get_table_data_CCLOG('CCLogAttributes', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+'')
-                                           ,""+startdate+"",""+enddate+"")
-df_table_cclogattributes = df_table_cclogattributes.drop(['Zone','LogTime','Attribute_DataType','LogTimeTicks'], axis=1)
-df_table_cclogattributes = df_table_cclogattributes.replace('\n',' ', regex=True)
-df_table_cclogattributes = df_table_cclogattributes.replace('\r',' ', regex=True)
-#df_table_cclogattributes.to_csv('data/cclogattributes_T_'+tenant+'.csv', index=False, header= True, encoding='utf-8')#iso-8859-15
+    df_table_ccvendors = df_table_ccvendors.replace('\n',' ', regex=True)
+    df_table_ccvendors = df_table_ccvendors.replace('\r',' ', regex=True)
+    df_table_ccvendors_bank = df_table_ccvendors_bank.replace('\n',' ', regex=True)
+    df_table_ccvendors_bank = df_table_ccvendors_bank.replace('\r',' ', regex=True)
 
 
-#df1 = pd.read_csv('data/cclogattributes_T_'+tenant+'.csv', encoding='utf-8')
+    count = 0
+    score_card_missing_vendor_vat_registration_id = pd.Series([],dtype=pd.StringDtype())
+    #score_card_missing_vendor_vat_registration_id = pd.DataFrame()
+    fehlercount = 0
 
-#df_new = filter_df_by_time(df_table_cclogattributes,'2022-12-20 09:44:23.030','2023-04-19 12:28:20.000')
 
-score_card = pd.Series([],dtype=pd.StringDtype())
-sollwerte = pd.read_csv('data/sollwerte.csv', encoding='utf-8')
-sollwerte_transposed = sollwerte.set_index('Unnamed: 0').T
+    for entry in score_card:
+        wrong_number = []
+        wrong_documentids = []
+        for item in entry:
+            #wrong_documentids.append(check_for_eap_error(item, score_card.index[count]))
+            wrong_documentids = (check_for_eap_error(item, score_card.index[count],dc_sorted_df_vendor_complete))
+            entry_wrong_number_vat_registration_id = df_table_ccvendors[(df_table_ccvendors['COMPANY_NUM'] == score_card.index[count]) & (df_table_ccvendors["VENDOR_NUM"] == item)& ~(df_table_ccvendors["VENDOR_VAT_REGISTRATION_ID"] == '')]
+            entry_wrong_number_registration_id = df_table_ccvendors[(df_table_ccvendors['COMPANY_NUM'] == score_card.index[count]) & (df_table_ccvendors["VENDOR_NUM"] == item)& ~(df_table_ccvendors["VENDOR_REGISTRATION_ID"] == '')] 
+            entry_wrong_number_iban = df_table_ccvendors_bank[(df_table_ccvendors_bank['COMPANY_NUM'] == score_card.index[count]) & (df_table_ccvendors_bank["VENDOR_NUM"] == item)& ~(df_table_ccvendors_bank["IBAN"] == '')]
+            if entry_wrong_number_vat_registration_id.empty: 
+                if item not in wrong_number:
+                    wrong_number.append(item) 
+                fehlercount += 100
+            if entry_wrong_number_registration_id.empty: 
+                if item not in wrong_number:
+                    wrong_number.append(item)
+                fehlercount += 10
+            if entry_wrong_number_iban.empty: 
+                if item not in wrong_number:
+                    wrong_number.append(item)
+                fehlercount += 1
+            
+            wrong_number.append(fehlercount)
+            if wrong_documentids:
+                wrong_number.append(wrong_documentids)
 
-df_results_debitor,df_results_frequency ,dc_sorted_df_debitor = get_data_values_complete_results(tenant, 'DEBITOR_NUM', df_table_cclogattributes)
-outliers_results = get_outliers(df_results_debitor)
-outliers_results_sorted_debitor = sort_outliers(outliers_results, df_results_frequency)
-outliers_results_debitor_frame = outliers_results_sorted_debitor.to_frame()
-sorted_counts, high_frequency_numbers_debitor = sort_numbers_by_position(outliers_results_debitor_frame, sollwerte_transposed,0, threshold=3)
+            fehlercount = 0
+        #print(wrong_documentids)
 
-bad_vendors = []
-for entry in high_frequency_numbers_debitor:
-    df_results_vendor, df_results_frequency_vendor, dc_sorted_df_vendor = get_data_values_complete_results(tenant, 'VENDOR_NUM', dc_sorted_df_debitor[entry])
-    outliers_results_vendor = get_outliers(df_results_vendor)
-    outliers_results_sorted_vendor = sort_outliers(outliers_results_vendor, df_results_frequency_vendor)
-    outliers_results_vendor_frame = outliers_results_sorted_vendor.to_frame()
-    sorted_counts_vendor, high_frequency_numbers_vendor = sort_numbers_by_position(outliers_results_vendor_frame, sollwerte_transposed, 0, threshold=3)
-    bad_vendors.append(high_frequency_numbers_vendor)
-    score_card[entry]  = high_frequency_numbers_vendor
-    
-df_table_ccvendors = get_table_data_ALL('CC_VENDORS', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''))
-df_table_ccvendors = df_table_ccvendors.replace('\n',' ', regex=True)
-df_table_ccvendors = df_table_ccvendors.replace('\r',' ', regex=True)
+        score_card_missing_vendor_vat_registration_id[score_card.index[count]] = wrong_number
+        count += 1
 
-count = 0
-score_card_missing_vendor_vat_registration_id = pd.Series([],dtype=pd.StringDtype())
+    print(score_card_missing_vendor_vat_registration_id)
+    #return(score_card_missing_vendor_vat_registration_id.to_json('data/scorecard_verbesserung.json', index=True))
+    score_card_missing_vendor_vat_registration_id = score_card_missing_vendor_vat_registration_id.to_json()
+    return(score_card_missing_vendor_vat_registration_id)
 
-for entry in score_card:
-    wrong_number = []
-    for item in entry:
-        entry_wrong_number = df_table_ccvendors[(df_table_ccvendors['COMPANY_NUM'] == score_card.index[count]) & (df_table_ccvendors["VENDOR_NUM"] == item)& (df_table_ccvendors["VENDOR_VAT_REGISTRATION_ID"] == '')] 
-        if not entry_wrong_number.empty:
-            wrong_number.append(entry_wrong_number['VENDOR_NUM'].item())
-            score_card_missing_vendor_vat_registration_id[score_card.index[count]] = wrong_number
-
-    count += 1
-    
-print(score_card_missing_vendor_vat_registration_id)
+if __name__ == "__main__":
+    get_improvement_results()
