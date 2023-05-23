@@ -21,6 +21,7 @@ from sqlalchemy.engine import URL
 from sqlalchemy import create_engine
 from json import dumps
 from flask_jsonpify import jsonify
+import json
 
 import sqlalchemy as sa
 import urllib
@@ -309,17 +310,24 @@ def sort_numbers_by_position(df, sollwerte_transposed ,col_name, threshold):
 
 def check_for_eap_error(vendor_num, debitor, dc_sorted_df_vendor_complete):  
         df_sort = dc_sorted_df_vendor_complete[debitor][vendor_num]
-        df_sort = df_sort[((df_sort['Attribute_Name'] == 'VatAmount1') & (df_sort['Delta'] == True)) | (df_sort['Attribute_Name'] == 'NetAmount1') & (df_sort['Delta'] == True) | (df_sort['Attribute_Name'] == 'VatRate1') & (df_sort['Delta'] == True)]
+        df_sort_vendor = df_sort[((df_sort['Attribute_Name'] == 'VENDOR_NUM') & (df_sort['Delta'] == False))]
+        documentid_list = df_sort_vendor[['DocumentID']].values.tolist()
+        merged = list(itertools.chain.from_iterable(documentid_list))
+        df_sorted = df_sort[df_sort['DocumentID'].isin(merged)]
 
-        if vendor_num == 'd-velop':
-                count_good = df_sort['DocumentID'].nunique()
-                count_good += count_good
+        df_sort_new = df_sorted[((df_sorted['Attribute_Name'] == 'VatAmount1') & (df_sorted['Delta'] == True)) | (df_sorted['Attribute_Name'] == 'NetAmount1') & (df_sorted['Delta'] == True) | (df_sorted['Attribute_Name'] == 'VatRate1') & (df_sorted['Delta'] == True)]
+
+        unique_documentid = df_sort_new['DocumentID'].unique()
+        without_vat = [x for x in merged if x not in unique_documentid]
         
-        unique_documentid = df_sort['DocumentID'].unique()
+        for document_id in without_vat:
+                df_sorted = df_sort[(df_sort["DocumentID"] == document_id) & (df_sort["Delta"] == True)]     
+                #display(df_sorted)     
+
         wrong_documentids = []
 
         for entry in unique_documentid:
-                sorted_by_documentid = df_sort.loc[(df_sort["DocumentID"] == entry)]
+                sorted_by_documentid = df_sort_new.loc[(df_sort_new["DocumentID"] == entry)]
                 len_sorted_by_documentid = len(sorted_by_documentid)
                 sorted_by_documentid = sorted_by_documentid.loc[(sorted_by_documentid["Attribute_Name"] == 'VatAmount1')]
                 if not sorted_by_documentid.empty:
@@ -417,9 +425,24 @@ def get_improvement_results():
         count += 1
 
     print(score_card_missing_vendor_vat_registration_id)
+    score_card_missing_vendor_vat_registration_id.to_json('data/scorecard_verbesserung_'+str(tenant)+'.json', index=True)
     #return(score_card_missing_vendor_vat_registration_id.to_json('data/scorecard_verbesserung.json', index=True))
     score_card_missing_vendor_vat_registration_id = score_card_missing_vendor_vat_registration_id.to_json()
+
     return(score_card_missing_vendor_vat_registration_id)
+
+def get_results_from_json():
+    with open('data/scorecard_df.json') as user_file:
+        file_contents = user_file.read()
+
+    return file_contents
+
+def get_results_from_json_debitor():
+    with open('data/results_debitor.json') as user_file:
+        file_contents = user_file.read()
+
+    return file_contents
+
 
 if __name__ == "__main__":
     get_improvement_results()
