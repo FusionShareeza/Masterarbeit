@@ -32,7 +32,7 @@ pd.options.display.max_columns=1000
 pd.options.display.max_rows = 10000
 pd.options.display.max_seq_items = 100
 verbose=1
-tenant = '0001ai'
+tenant = '000ht3'
 
 def connect_to_db_better(connection_string,
                     database,
@@ -442,6 +442,21 @@ def get_results_from_json_debitor():
         file_contents = user_file.read()
 
     return file_contents
+
+def get_current_status():
+     x =  '{ "status":"Rot"}'
+     return x
+
+def get_debitor_results():
+    df = pd.read_csv('data/cclogattributes_'+tenant+'_reduced.csv', encoding='utf-8')
+    abc = 0
+    len = 0
+    abc, len = get_single_value(df, 'DEBITOR_NUM')
+    score = '{"score":"'+abc+'"}'
+    return score
+
+
+
 
 
 if __name__ == "__main__":

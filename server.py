@@ -25,5 +25,16 @@ def get_from_json_debitor():
     results = get_results_from_json_debitor()
     return jsonify(results)
 
+@app.route('/aktueller_zustand', methods=['GET'])
+def get_current_status_func():
+    results = get_current_status()
+    return jsonify(results)
+
+@app.route('/mandantenerkennung', methods=['GET'])
+def get_debitor_results_func():
+    results = get_debitor_results()
+    return jsonify(results)
+
+
 if __name__ == '__main__':
    app.run(port=5002)
