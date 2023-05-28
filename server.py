@@ -25,16 +25,31 @@ def get_from_json_debitor():
     results = get_results_from_json_debitor()
     return jsonify(results)
 
-@app.route('/aktueller_zustand', methods=['GET'])
-def get_current_status_func():
-    results = get_current_status()
-    return jsonify(results)
-
 @app.route('/mandantenerkennung', methods=['GET'])
 def get_debitor_results_func():
     results = get_debitor_results()
     return jsonify(results)
 
+@app.route('/lieferantenerkennung', methods=['GET'])
+def get_vendor_results_func():
+    results = get_vendor_results()
+    return jsonify(results)
+
+@app.route('/positionserkennung', methods=['GET'])
+def get_pos_results_func():
+    results = get_pos_results()
+    return jsonify(results)
+
+@app.route('/smartinvoice', methods=['GET'])
+def get_smart_invoice_error_fun():
+    results = get_smart_invoice_error()
+    print(results)
+    return jsonify(results)
+
+@app.route('/aktueller_zustand', methods=['GET'])
+def get_current_status_func():
+    results = get_current_status()
+    return jsonify(results)
 
 if __name__ == '__main__':
    app.run(port=5002)

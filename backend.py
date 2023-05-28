@@ -32,7 +32,8 @@ pd.options.display.max_columns=1000
 pd.options.display.max_rows = 10000
 pd.options.display.max_seq_items = 100
 verbose=1
-tenant = '000ht3'
+tenant = '0001ai'
+critical = 0
 
 def connect_to_db_better(connection_string,
                     database,
@@ -444,20 +445,86 @@ def get_results_from_json_debitor():
     return file_contents
 
 def get_current_status():
-     x =  '{ "status":"Rot"}'
-     return x
+    global critical
+
+    print(critical)
+    if(critical == 0): 
+        x =  '{ "status":"Grün"}'
+    elif(2>=critical >=1):
+        x =  '{ "status":"Gelb"}'
+    elif(critical > 2):
+        x =  '{ "status":"Rot"}'
+    critical = 0
+    return x
 
 def get_debitor_results():
-    df = pd.read_csv('data/cclogattributes_'+tenant+'_reduced.csv', encoding='utf-8')
-    abc = 0
+    df = pd.read_csv('data/cclogattributes_T_'+tenant+'_reduced.csv', encoding='utf-8')
+    value = 0
     len = 0
-    abc, len = get_single_value(df, 'DEBITOR_NUM')
-    score = '{"score":"'+abc+'"}'
+    value, len = get_single_value(df, 'DEBITOR_NUM')
+
+    score = '{"score":"'+str(value)+'","frequency":"'+str(len)+'"}'
+    if(value < 0.93):
+        global critical
+        critical += 1
+
+    return score
+
+def get_vendor_results():
+    df = pd.read_csv('data/cclogattributes_T_'+tenant+'_reduced.csv', encoding='utf-8')
+    value = 0
+    len = 0
+    value, len = get_single_value(df, 'VENDOR_NUM')
+    score = '{"score":"'+str(value)+'","frequency":"'+str(len)+'"}'
+
+    if(value < 0.90):
+        global critical
+        critical += 1
     return score
 
 
+def get_pos_results():
+    df = pd.read_csv('data/cclogattributes_T_'+tenant+'_reduced.csv', encoding='utf-8')
+    df_sorted = df.sort_values(by='DocumentID')
+    attribute_names = ['VatAmount1', 'NetAmount1', 'VatRate1', 'InvoiceNumber', 'InvoiceDate']
+    filtered_df = df_sorted[(df_sorted['Attribute_Name'].isin(attribute_names)) & (df_sorted['Delta'] == True)]
+    grouped_df = filtered_df.groupby(df_sorted['DocumentID'].ne(df_sorted['DocumentID'].shift()).cumsum())
 
+    count_per_group = grouped_df.size()
+    bad_documents = len(count_per_group)
+    whole_documents = df_sorted['DocumentID'].nunique()
+    value = 1-(bad_documents/whole_documents)
+    good_documents = whole_documents-bad_documents
+    score = '{"score":"'+str(value)+'","frequency":"'+str(whole_documents)+'"}'
+    if(value < 0.80):
+        global critical
+        critical += 1
+    return score
 
+def get_smart_invoice_error():
+    df = pd.read_csv('data/cclogattributes_T_'+tenant+'_reduced.csv', encoding='utf-8')
+    df_sorted_without_vendor_bad = df[~((df['Attribute_Name'] == 'VENDOR_NUM') & (df['Delta'] == True))]
+    df_sorted_without_vendor_bad = df_sorted_without_vendor_bad[df_sorted_without_vendor_bad['DocumentID'].isin(df_sorted_without_vendor_bad[df_sorted_without_vendor_bad['Attribute_Name'] == 'VENDOR_NUM']['DocumentID'])]
+    attribute_names = ['InvoiceDate','InvoiceNumber','GrossAmount']
+    attribute_names_new = ['VatRate1','NetAmount1','VatAmount1']
+    filtered_df = df_sorted_without_vendor_bad[(df_sorted_without_vendor_bad['Attribute_Name'].isin(attribute_names)) & (df_sorted_without_vendor_bad['Delta'] == True)]
+    grouped_attributes = filtered_df.groupby('DocumentID')['Attribute_Name'].agg(lambda x: ', '.join(sorted(set(x))))
+    combination_counts = grouped_attributes.value_counts()
+    x = filtered_df['Attribute_Name'].value_counts()
+    #print(x)
+    #print(combination_counts)
+
+    grouped_df = filtered_df.groupby(df_sorted_without_vendor_bad['DocumentID'].ne(df_sorted_without_vendor_bad['DocumentID'].shift()).cumsum())
+    count_per_group = grouped_df.size()
+    bad_documents = len(count_per_group)
+    whole_documents = df_sorted_without_vendor_bad['DocumentID'].nunique()
+    value = (x[0]/whole_documents)
+    good_documents = whole_documents-bad_documents
+
+    #print('Häufigkeit: '+str(value)+' %')
+    
+    score = '{"score":"'+str(value)+'","frequency":"'+str(whole_documents)+'"}'
+    return score
 
 if __name__ == "__main__":
     get_improvement_results()
