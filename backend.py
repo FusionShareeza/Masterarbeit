@@ -32,7 +32,7 @@ pd.options.display.max_columns=1000
 pd.options.display.max_rows = 10000
 pd.options.display.max_seq_items = 100
 verbose=1
-tenant = '0001ai'
+tenant = '000git'
 critical = 0
 
 def connect_to_db_better(connection_string,
@@ -355,28 +355,48 @@ def get_improvement_results():
     df_table_cclogattributes = df_table_cclogattributes.replace('\r',' ', regex=True)
 
     score_card = pd.Series([],dtype=pd.StringDtype())
+    df_scorecard_dataframe = pd.DataFrame(columns=['Mandant','Lieferant','Fehlercode','DocumentID','MissingCode'])
+
     sollwerte = pd.read_csv('data/sollwerte.csv', encoding='utf-8')
     sollwerte_transposed = sollwerte.set_index('Unnamed: 0').T
     dc_sorted_df_vendor_complete = dict()
 
+    dc_all_results_df_vendor_complete = {}
 
-    df_results_debitor,df_results_frequency ,dc_sorted_df_debitor = get_data_values_complete_results(tenant, 'DEBITOR_NUM', df_table_cclogattributes)
-    outliers_results = get_outliers(df_results_debitor, sollwerte_transposed)
+    df_results_debitor,df_results_frequency ,dc_sorted_df_debitor, schmutz = get_data_values_complete_results(tenant, 'DEBITOR_NUM', df_table_cclogattributes)
+    outliers_results = get_outliers(df_results_debitor)
     outliers_results_sorted_debitor = sort_outliers(outliers_results, df_results_frequency)
     outliers_results_debitor_frame = outliers_results_sorted_debitor.to_frame()
     sorted_counts, high_frequency_numbers_debitor = sort_numbers_by_position(outliers_results_debitor_frame, sollwerte_transposed,0, threshold=3)
 
     bad_vendors = []
+    count = 0
     for entry in high_frequency_numbers_debitor:
         dc_sorted_df_vendor_complete[entry] = {}
-        df_results_vendor, df_results_frequency_vendor, dc_sorted_df_vendor = get_data_values_complete_results(tenant, 'VENDOR_NUM', dc_sorted_df_debitor[entry])
+        dc_all_results_df_vendor_complete[entry] = {}
+        df_results_vendor, df_results_frequency_vendor, dc_sorted_df_vendor, dc_vendors = get_data_values_complete_results(tenant, 'VENDOR_NUM', dc_sorted_df_debitor[entry])
+        dc_all_results_df_vendor_complete[entry].update(dc_vendors)
         dc_sorted_df_vendor_complete[entry].update(dc_sorted_df_vendor)
-        outliers_results_vendor = get_outliers(df_results_vendor, sollwerte_transposed)
+        outliers_results_vendor = get_outliers(df_results_vendor)
         outliers_results_sorted_vendor = sort_outliers(outliers_results_vendor, df_results_frequency_vendor)
         outliers_results_vendor_frame = outliers_results_sorted_vendor.to_frame()
         sorted_counts_vendor, high_frequency_numbers_vendor = sort_numbers_by_position(outliers_results_vendor_frame, sollwerte_transposed, 0, threshold=3)
         bad_vendors.append(high_frequency_numbers_vendor)
+        print(high_frequency_numbers_vendor)
+
+        for entry_high_frequency_numbers_vendor in high_frequency_numbers_vendor:
+            df_scorecard_dataframe.loc[count, 'Mandant'] = entry
+            df_scorecard_dataframe.loc[count, 'Lieferant'] = entry_high_frequency_numbers_vendor 
+            count += 1
+            
         score_card[entry]  = high_frequency_numbers_vendor
+
+    for entry in list(set(df_results_debitor.index) - set(high_frequency_numbers_debitor)):
+        dc_sorted_df_vendor_complete[entry] = {}
+        dc_all_results_df_vendor_complete[entry] = {}
+        df_results_vendor, df_results_frequency_vendor, dc_sorted_df_vendor, dc_vendors = get_data_values_complete_results(tenant, 'VENDOR_NUM', dc_sorted_df_debitor[entry])
+        dc_all_results_df_vendor_complete[entry].update(dc_vendors)
+        dc_sorted_df_vendor_complete[entry].update(dc_sorted_df_vendor)
         
     df_table_ccvendors = get_table_data_ALL('CC_VENDORS', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''))
     df_table_ccvendors_bank = get_table_data_ALL('CC_VENDOR_BANK', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''))
@@ -511,8 +531,6 @@ def get_smart_invoice_error():
     grouped_attributes = filtered_df.groupby('DocumentID')['Attribute_Name'].agg(lambda x: ', '.join(sorted(set(x))))
     combination_counts = grouped_attributes.value_counts()
     x = filtered_df['Attribute_Name'].value_counts()
-    #print(x)
-    #print(combination_counts)
 
     grouped_df = filtered_df.groupby(df_sorted_without_vendor_bad['DocumentID'].ne(df_sorted_without_vendor_bad['DocumentID'].shift()).cumsum())
     count_per_group = grouped_df.size()
@@ -520,8 +538,6 @@ def get_smart_invoice_error():
     whole_documents = df_sorted_without_vendor_bad['DocumentID'].nunique()
     value = (x[0]/whole_documents)
     good_documents = whole_documents-bad_documents
-
-    #print('Häufigkeit: '+str(value)+' %')
     
     score = '{"score":"'+str(value)+'","frequency":"'+str(whole_documents)+'"}'
     return score

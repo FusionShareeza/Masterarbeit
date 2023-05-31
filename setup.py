@@ -11,6 +11,6 @@ import numpy
 
 setup(
     ext_modules=cythonize(
-        ['funci.pyx', ],  # Python code file with primes() function
+        ['funktion4.pyx', ],  # Python code file with primes() function
         annotate=True),                 # enables generation of the html annotation file
 )
