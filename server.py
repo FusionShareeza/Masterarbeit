@@ -51,5 +51,32 @@ def get_current_status_func():
     results = get_current_status()
     return jsonify(results)
 
+@app.route('/komplette_ergebnisse', methods=['GET'])
+def get_results_from_json_complete_func():
+    results = get_results_from_json_complete()
+    return jsonify(results)
+
+@app.route('/komplette_ergebnisse_frequenz', methods=['GET'])
+def get_results_from_json_complete_frequency_func():
+    results = get_results_from_json_complete_frequency()
+    return jsonify(results)
+
+
+@app.route('/sollwerte', methods=['GET'])
+def get_sollwerte_func():
+    results = get_sollwerte()
+    return jsonify(results)
+
+@app.route('/sollwerte_verbesserungen', methods=['GET'])
+def get_sollwerte_verbesserungen_func():
+    results = get_commments_from_sollwerte()
+    return jsonify(results)
+
+@app.route('/autotrain_info', methods=['GET'])
+def get_autotrain_results_func():
+    results = get_autotrain_results()
+    return results
+
+
 if __name__ == '__main__':
    app.run(port=5002)
