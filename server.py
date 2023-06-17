@@ -77,7 +77,7 @@ def get_sollwerte_verbesserungen_func():
 @app.route('/autotrain_info', methods=['GET'])
 def get_autotrain_results_func():
     results = get_autotrain_results()
-    return results
+    return jsonify(results)
 
 
 if __name__ == '__main__':

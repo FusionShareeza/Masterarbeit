@@ -30,9 +30,9 @@ import urllib
 from sqlalchemy import text
 from collections import Counter
 from collections import defaultdict
+from datetime import datetime 
 
-
-tenant = '000git'
+tenant = '0001ai'
 path = 'data/'+tenant+''
 try: 
     os.mkdir(path) 
@@ -147,20 +147,30 @@ def get_data_values_two_booleans2(df, items):
     except:
          return pd.NA , pd.NA
     
-
 def get_single_value(df, value):
     df_ordernum = df.loc[(df['Attribute_Name'] == value)] 
     dist = df_ordernum['Delta'].value_counts(normalize=True)
-    try:
-        score_false = dist.loc[False]
-        if(score_false >= 0):
-            score = score_false
-        elif(score_false == 0):
-            score = dist.loc[True]
-    except:
-        return pd.NA , pd.NA
 
-    return score, len(df_ordernum)
+    try: 
+        score_false = dist.loc[False]
+    except:
+        score_false = pd.NA
+
+    try: 
+        score_true = dist.loc[True]
+    except:
+        score_true = pd.NA
+    
+    if not pd.isna(score_true):
+        score = 1 - score_true
+    else:
+        score = score_false
+    
+    try:
+        return score, len(df_ordernum)
+
+    except:
+        return score , pd.NA
 
 
 def get_data_values_complete_results(tenant, splitkey,df_new):
@@ -410,6 +420,32 @@ def check_for_eap_error(vendor_num, debitor, dc_sorted_df_vendor_complete):
 
         return wrong_documentids, error_codes
 
+
+def convert_date(date_string):
+    input_format = "%d.%m.%Y %H:%M:%S"
+    output_format = "%Y-%m-%d %H:%M:%S"
+    date_object = datetime.strptime(date_string, input_format)
+    converted_date = datetime.strftime(date_object, output_format)
+    
+    return converted_date
+
+def check_distribution(df, changed_type, stop_time ):
+    converted_date = convert_date(stop_time)
+    df_before = df[df['LogTime'] < converted_date]
+    df_after = df[df['LogTime'] >= converted_date]
+    if not df_before.empty or not df_after.empty:
+        if changed_type == 'TrustedAmount':
+            changed_type = 'GrossAmount'
+        if changed_type == 'invoicenumber':
+            changed_type = 'InvoiceNumber'
+        if changed_type == 'invoicedate':
+            changed_type = 'InvoiceDate'
+        distribution_before = get_single_value(df_before, changed_type)
+        distribution_after = get_single_value(df_after, changed_type)
+
+    return distribution_before, distribution_after
+
+
 def get_improvement_results():
     if not os.path.isfile('data/'+str(tenant)+'/autotrain_'+str(tenant)+'_.json') or not os.path.isfile('data/'+str(tenant)+'/scorecard_df_'+str(tenant)+'_.json') or not os.path.isfile('data/'+str(tenant)+'/results_complete_frequency_'+str(tenant)+'_.json'):
         print("bin drin ")
@@ -553,10 +589,9 @@ def get_improvement_results():
         flat_dict = dict(flat_dict)
 
         for df_name, df in flat_dict.items():
-            print(df)
             sorted_df = df.sort_values(by='LogTime', ascending=False)
-
             unique_ids = []
+
 
             for index, row in sorted_df.iterrows():
                 if row['DocumentID'] not in unique_ids:
@@ -568,15 +603,32 @@ def get_improvement_results():
                 return ','.join(entry_list) if entry_list else ''
                 
             if str(df_name) in merged_df['VENDOR_NUM'].unique():
+                print(df_name)
+                y = merged_df[merged_df['VENDOR_NUM'] == df_name]
+                if 'inserted' in y['STATUS'].unique(): 
+                    stop_time = y['STOP_TIME']
+                    changed_type = y['CHANGED_TYPE']
+                    for item, item2 in zip(stop_time, changed_type):
+                        x = merged_df[merged_df['CHANGED_TYPE'] == item2]
+                        score_before, score_after = check_distribution(df, item2, item )
+                        abc = y.index
+                    for thing in abc:
+                        merged_df.at[thing, 'ScoreBefore'] = score_before[0]
+                        merged_df.at[thing, 'ScoreAfter'] = score_after[0]
+                        merged_df.at[thing, 'FrequencyBefore'] = score_before[1]
+                        merged_df.at[thing, 'FrequencyAfter'] = score_after[1]
+
+
                 res = merged_df.index[merged_df['VENDOR_NUM'].isin({df_name})]
                 for item in res:
                     merged_df.at[item, 'LastDocuments'] = join_entries(unique_ids)
 
+        merged_df = merged_df.replace({np.nan: None})
         data_dict = merged_df.set_index('VENDOR_NUM').T.to_dict()
         json_obj = {key: value for key, value in data_dict.items()}
 
         save_file = open('data/'+str(tenant)+'/autotrain_'+str(tenant)+'_.json', "w")  
-        json.dump(json_obj, save_file, indent = 6)  
+        json.dump(json_obj, save_file, indent = 6, allow_nan=True)  
         save_file.close()  
 
         x =  '{ "here":"1"}'
