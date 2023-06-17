@@ -13,6 +13,7 @@ CORS(app)
 @app.route('/results_tenant', methods=['GET'])
 def get_results():
     results = get_improvement_results()
+    print(results)
     return jsonify(results)
 
 @app.route('/json_saved', methods=['GET'])
@@ -23,6 +24,7 @@ def get_from_json():
 @app.route('/json_saved_debitor', methods=['GET'])
 def get_from_json_debitor():
     results = get_results_from_json_debitor()
+    print(results)
     return jsonify(results)
 
 @app.route('/mandantenerkennung', methods=['GET'])

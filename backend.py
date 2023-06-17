@@ -29,12 +29,16 @@ import sqlalchemy as sa
 import urllib
 from sqlalchemy import text
 from collections import Counter
-#config vars
-pd.options.display.max_columns=1000
-pd.options.display.max_rows = 10000
-pd.options.display.max_seq_items = 100
-verbose=1
+from collections import defaultdict
+
+
 tenant = '000git'
+path = 'data/'+tenant+''
+try: 
+    os.mkdir(path) 
+except: 
+    print('schon da') 
+
 critical = 0
 
 def connect_to_db_better(connection_string,
@@ -159,32 +163,29 @@ def get_single_value(df, value):
     return score, len(df_ordernum)
 
 
-        
-    return score, len(df_ordernum)
-
-
-list1 = [['OrderNum',False,'DEBITOR_NUM'],
-         ['OrderNum',False,'VENDOR_NUM'],
-         ['OrderNum',True,'DEBITOR_NUM'],
-         ['VENDOR_NUM',False,'InvoiceNumber'],
-         ['VENDOR_NUM',True,'InvoiceNumber'],
-         ['VENDOR_NUM',False,'InvoiceDate'],
-         ['VENDOR_NUM',True,'InvoiceDate'],
-         ['VENDOR_NUM',False,'GrossAmount'],
-         ['VENDOR_NUM',True,'GrossAmount'],
-         ['VENDOR_NUM',False,'NetAmount1'],
-         ['VENDOR_NUM',True,'NetAmount1'],
-         ['VENDOR_NUM',False,'VatAmount1'],
-         ['VENDOR_NUM',True,'VatAmount1'],
-         ]
-
-list2 = [['OrderNum',True,'DEBITOR_NUM',False,'VENDOR_NUM'],
-            ['OrderNum',True,'DEBITOR_NUM',True,'VENDOR_NUM'],
-            ]
-
 def get_data_values_complete_results(tenant, splitkey,df_new):
 
+    list1 = [['OrderNum',False,'DEBITOR_NUM'],
+            ['OrderNum',False,'VENDOR_NUM'],
+            ['OrderNum',True,'DEBITOR_NUM'],
+            ['VENDOR_NUM',False,'InvoiceNumber'],
+            ['VENDOR_NUM',True,'InvoiceNumber'],
+            ['VENDOR_NUM',False,'InvoiceDate'],
+            ['VENDOR_NUM',True,'InvoiceDate'],
+            ['VENDOR_NUM',False,'GrossAmount'],
+            ['VENDOR_NUM',True,'GrossAmount'],
+            ['VENDOR_NUM',False,'NetAmount1'],
+            ['VENDOR_NUM',True,'NetAmount1'],
+            ['VENDOR_NUM',False,'VatAmount1'],
+            ['VENDOR_NUM',True,'VatAmount1'],
+            ]
+
+    list2 = [['OrderNum',True,'DEBITOR_NUM',False,'VENDOR_NUM'],
+                ['OrderNum',True,'DEBITOR_NUM',True,'VENDOR_NUM'],
+                ]
     dc_vendors = {}
+    dc_frequency = {}
+
     dc_sorted_df = split_datframe_into_whatever(splitkey, df_new)
     
     df_results = pd.DataFrame(columns=['q(OrderNum)','q(VENDOR_NUM)',
@@ -224,6 +225,7 @@ def get_data_values_complete_results(tenant, splitkey,df_new):
             ])
 
     for key, df in dc_sorted_df.items():
+
         df_speicher = pd.DataFrame(columns=['q(OrderNum)','q(VENDOR_NUM)',
             'q(DEBITOR_NUM|OrderNum)',
             'q(VENDOR_NUM|OrderNum)',
@@ -241,6 +243,25 @@ def get_data_values_complete_results(tenant, splitkey,df_new):
             'q(VENDOR_NUM | !OrderNum & DEBITOR_NUM)',
             'q(VENDOR_NUM| !OrderNum & ! DEBITOR_NUM)',
             ])
+        
+        df_speicher2 = pd.DataFrame(columns=['q(OrderNum)','q(VENDOR_NUM)',
+            'q(DEBITOR_NUM|OrderNum)',
+            'q(VENDOR_NUM|OrderNum)',
+            'q(DEBITOR_NUM|!OrderNum)',
+            'q(InvoiceNumber|VENDOR_NUM)',
+            'q(InvoiceNumber|!VENDOR_NUM)',
+            'q(InvoiceDate|VENDOR_NUM)',
+            'q(InvoiceDate|!VENDOR_NUM)',
+            'q(GrossAmount|VENDOR_NUM)',
+            'q(GrossAmount|!VENDOR_NUM)',
+            'q(NetAmount1|VENDOR_NUM)',
+            'q(NetAmount1|!VENDOR_NUM)',
+            'q(VatAmount1|VENDOR_NUM)',
+            'q(VatAmount1|!VENDOR_NUM)',
+            'q(VENDOR_NUM | !OrderNum & DEBITOR_NUM)',
+            'q(VENDOR_NUM| !OrderNum & ! DEBITOR_NUM)',
+            ])
+        
         result_list = []
         result_list_frequency = []
 
@@ -263,14 +284,40 @@ def get_data_values_complete_results(tenant, splitkey,df_new):
             result_list.append(twovalues)
             result_list_frequency.append(twovalues_frequency)
             
-        df_speicher.loc[key] = result_list   
+        df_speicher.loc[key] = result_list 
+        df_speicher2.loc[key] = result_list_frequency
+  
         df_results.loc[key] = result_list
-        dc_vendors[key] = df_speicher
         df_results_frequency.loc[key] = result_list_frequency
 
-        
-    return df_results, df_results_frequency ,dc_sorted_df, dc_vendors
 
+        
+        dc_vendors[key] = df_speicher    
+        dc_frequency[key] = df_speicher2
+        
+    return df_results, df_results_frequency ,dc_sorted_df, dc_vendors, dc_frequency
+
+def save_dc_to_json(dc,name):
+    def convert_dataframe_to_json(df):
+        return df.replace({pd.NA: None}).to_dict(orient="records")
+
+    def convert_dict_to_json(dictionary):
+        converted_dict = {}
+        for key, value in dictionary.items():
+            if isinstance(value, dict):
+                converted_dict[key] = convert_dict_to_json(value)
+            elif isinstance(value, pd.DataFrame):
+                converted_dict[key] = convert_dataframe_to_json(value)
+            else:
+                converted_dict[key] = value
+        return converted_dict
+
+    converted_data = convert_dict_to_json(dc)
+
+    json_data = json.dumps(converted_data)
+
+    with open("data/"+str(tenant)+"/"+name+"_.json", "w") as file:
+        file.write(json_data)
 
 def first_element(row):
     return row[0]
@@ -364,115 +411,121 @@ def check_for_eap_error(vendor_num, debitor, dc_sorted_df_vendor_complete):
         return wrong_documentids, error_codes
 
 def get_improvement_results():
-    sollwerte = pd.read_csv('data/sollwerte.csv', encoding='utf-8')
-    sollwerte_transposed = sollwerte.set_index('Unnamed: 0').T
+    if not os.path.isfile('data/'+str(tenant)+'/autotrain_'+str(tenant)+'_.json') or not os.path.isfile('data/'+str(tenant)+'/scorecard_df_'+str(tenant)+'_.json') or not os.path.isfile('data/'+str(tenant)+'/results_complete_frequency_'+str(tenant)+'_.json'):
+        print("bin drin ")
+        sollwerte = pd.read_csv('data/sollwerte.csv', encoding='utf-8')
+        sollwerte_transposed = sollwerte.set_index('Unnamed: 0').T
 
-    startdate = "'2022-12-20 09:44:23.030'"
-    enddate = "'2023-05-31 12:28:20.000'"
-
-    df_table_cclogattributes = get_table_data_CCLOG('CCLogAttributes', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+'')
-                                            ,""+startdate+"",""+enddate+"")
-    df_table_cclogattributes = df_table_cclogattributes.drop(['Zone','LogTime','Attribute_DataType','LogTimeTicks'], axis=1)
-    df_table_cclogattributes = df_table_cclogattributes.replace('\n',' ', regex=True)
-    df_table_cclogattributes = df_table_cclogattributes.replace('\r',' ', regex=True)
-
-    score_card = pd.Series([],dtype=pd.StringDtype())
-    df_scorecard_dataframe = pd.DataFrame(columns=['Mandant','Lieferant','Fehlercode','DocumentID','MissingCode'])
-
-    sollwerte = pd.read_csv('data/sollwerte.csv', encoding='utf-8')
-    sollwerte_transposed = sollwerte.set_index('Unnamed: 0').T
-    dc_sorted_df_vendor_complete = dict()
-
-    dc_all_results_df_vendor_complete = {}
-
-    df_results_debitor,df_results_frequency ,dc_sorted_df_debitor, schmutz = get_data_values_complete_results(tenant, 'DEBITOR_NUM', df_table_cclogattributes)
-    outliers_results = get_outliers(df_results_debitor, sollwerte_transposed)
-    outliers_results_sorted_debitor = sort_outliers(outliers_results, df_results_frequency)
-    outliers_results_debitor_frame = outliers_results_sorted_debitor.to_frame()
-    sorted_counts, high_frequency_numbers_debitor = sort_numbers_by_position(outliers_results_debitor_frame, sollwerte_transposed,0, threshold=3)
-
-    bad_vendors = []
-    count = 0
-    for entry in high_frequency_numbers_debitor:
-        dc_sorted_df_vendor_complete[entry] = {}
-        dc_all_results_df_vendor_complete[entry] = {}
-        df_results_vendor, df_results_frequency_vendor, dc_sorted_df_vendor, dc_vendors = get_data_values_complete_results(tenant, 'VENDOR_NUM', dc_sorted_df_debitor[entry])
-        dc_all_results_df_vendor_complete[entry].update(dc_vendors)
-        dc_sorted_df_vendor_complete[entry].update(dc_sorted_df_vendor)
-        outliers_results_vendor = get_outliers(df_results_vendor, sollwerte_transposed)
-        outliers_results_sorted_vendor = sort_outliers(outliers_results_vendor, df_results_frequency_vendor)
-        outliers_results_vendor_frame = outliers_results_sorted_vendor.to_frame()
-        sorted_counts_vendor, high_frequency_numbers_vendor = sort_numbers_by_position(outliers_results_vendor_frame, sollwerte_transposed, 0, threshold=3)
-        bad_vendors.append(high_frequency_numbers_vendor)
-        print(high_frequency_numbers_vendor)
-
-        for entry_high_frequency_numbers_vendor in high_frequency_numbers_vendor:
-            df_scorecard_dataframe.loc[count, 'Mandant'] = entry
-            df_scorecard_dataframe.loc[count, 'Lieferant'] = entry_high_frequency_numbers_vendor 
-            count += 1
-            
-        score_card[entry]  = high_frequency_numbers_vendor
-
-    for entry in list(set(df_results_debitor.index) - set(high_frequency_numbers_debitor)):
-        dc_sorted_df_vendor_complete[entry] = {}
-        dc_all_results_df_vendor_complete[entry] = {}
-        df_results_vendor, df_results_frequency_vendor, dc_sorted_df_vendor, dc_vendors = get_data_values_complete_results(tenant, 'VENDOR_NUM', dc_sorted_df_debitor[entry])
-        dc_all_results_df_vendor_complete[entry].update(dc_vendors)
-        dc_sorted_df_vendor_complete[entry].update(dc_sorted_df_vendor)
-        
-    df_table_ccvendors = get_table_data_ALL('CC_VENDORS', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''))
-    df_table_ccvendors_bank = get_table_data_ALL('CC_VENDOR_BANK', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''))
-
-    df_table_ccvendors = df_table_ccvendors.replace('\n',' ', regex=True)
-    df_table_ccvendors = df_table_ccvendors.replace('\r',' ', regex=True)
-    df_table_ccvendors_bank = df_table_ccvendors_bank.replace('\n',' ', regex=True)
-    df_table_ccvendors_bank = df_table_ccvendors_bank.replace('\r',' ', regex=True)
-
-    current_mandant = None
-    current_lieferant = None
-
-    # Schleife über die Spalten des DataFrames
-    for column in df_scorecard_dataframe.columns:
-        if column == 'Mandant':
-            current_mandant = df_scorecard_dataframe[column]
-        elif column == 'Lieferant':
-            current_lieferant = df_scorecard_dataframe[column]
-
-    i = 0
-
-    while i < len(current_mandant):
-        fehlercount = 0
-        wrong_documentids, error_codes = (check_for_eap_error(current_lieferant[i], current_mandant[i], dc_sorted_df_vendor_complete))
-        entry_wrong_number_vat_registration_id = df_table_ccvendors[(df_table_ccvendors['COMPANY_NUM'] == current_mandant[i]) & (df_table_ccvendors["VENDOR_NUM"] == current_lieferant[i])& ~(df_table_ccvendors["VENDOR_VAT_REGISTRATION_ID"] == '')]
-        entry_wrong_number_registration_id = df_table_ccvendors[(df_table_ccvendors['COMPANY_NUM'] == current_mandant[i]) & (df_table_ccvendors["VENDOR_NUM"] == current_lieferant[i])& ~(df_table_ccvendors["VENDOR_REGISTRATION_ID"] == '')] 
-        entry_wrong_number_iban = df_table_ccvendors_bank[(df_table_ccvendors_bank['COMPANY_NUM'] == current_mandant[i]) & (df_table_ccvendors_bank["VENDOR_NUM"] == current_lieferant[i])& ~(df_table_ccvendors_bank["IBAN"] == '')]
-        
-
-        if entry_wrong_number_vat_registration_id.empty: 
-            fehlercount += 100
-        if entry_wrong_number_registration_id.empty: 
-            fehlercount += 10
-        if entry_wrong_number_iban.empty: 
-            fehlercount += 1
-        
-        df_scorecard_dataframe.loc[i, 'Fehlercode'] = fehlercount
-        df_scorecard_dataframe.loc[i, 'DocumentID'] = wrong_documentids
-        df_scorecard_dataframe.loc[i, 'MissingCode'] = error_codes
-
-        i+=1
-
-    df_scorecard_dataframe.to_json('data/scorecard_df_'+str(tenant)+'_.json', orient="records")
-    df_scorecard_dataframe = df_scorecard_dataframe.to_json(orient="records")
-    return(df_scorecard_dataframe)
-
-def get_autotrain_results():
-    if(os.path.isfile('data/autotrain_'+str(tenant)+'_.json') == True):
-        with open('data/autotrain_'+str(tenant)+'_.json') as user_file:
-            file_contents = user_file.read()
-        return file_contents
-    else:
         startdate = "'2022-12-20 09:44:23.030'"
         enddate = "'2023-05-31 12:28:20.000'"
+
+        df_table_cclogattributes = get_table_data_CCLOG('CCLogAttributes', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+'')
+                                                ,""+startdate+"",""+enddate+"")
+        df_table_cclogattributes = df_table_cclogattributes.drop(['Zone','Attribute_DataType','LogTimeTicks'], axis=1)
+        df_table_cclogattributes = df_table_cclogattributes.replace('\n',' ', regex=True)
+        df_table_cclogattributes = df_table_cclogattributes.replace('\r',' ', regex=True)
+        print("hier bin ich ")
+        df_table_cclogattributes.to_csv('./data/'+str(tenant)+'/cclogattributes_T_'+tenant+'_reduced.csv', index=False, header= True, encoding='utf-8')
+
+        score_card = pd.Series([],dtype=pd.StringDtype())
+        df_scorecard_dataframe = pd.DataFrame(columns=['Mandant','Lieferant','Fehlercode','DocumentID','MissingCode'])
+
+        sollwerte = pd.read_csv('data/sollwerte.csv', encoding='utf-8')
+        sollwerte_transposed = sollwerte.set_index('Unnamed: 0').T
+        dc_sorted_df_vendor_complete = dict()
+        dc_all_frequency_df_vendor_complete = {}
+        dc_all_results_df_vendor_complete = {}
+
+        df_results_debitor,df_results_frequency ,dc_sorted_df_debitor, schmutz, schmutz2 = get_data_values_complete_results(tenant, 'DEBITOR_NUM', df_table_cclogattributes)
+        outliers_results = get_outliers(df_results_debitor, sollwerte_transposed)
+        outliers_results_sorted_debitor = sort_outliers(outliers_results, df_results_frequency)
+        outliers_results_debitor_frame = outliers_results_sorted_debitor.to_frame()
+        sorted_counts, high_frequency_numbers_debitor = sort_numbers_by_position(outliers_results_debitor_frame, sollwerte_transposed,0, threshold=3)
+
+        bad_vendors = []
+        count = 0
+        for entry in high_frequency_numbers_debitor:
+            dc_sorted_df_vendor_complete[entry] = {}
+            dc_all_results_df_vendor_complete[entry] = {}
+            dc_all_frequency_df_vendor_complete[entry] = {}
+            df_results_vendor, df_results_frequency_vendor, dc_sorted_df_vendor, dc_vendors, dc_frequency = get_data_values_complete_results(tenant, 'VENDOR_NUM', dc_sorted_df_debitor[entry])
+            dc_all_results_df_vendor_complete[entry].update(dc_vendors)
+            dc_sorted_df_vendor_complete[entry].update(dc_sorted_df_vendor)
+            #display(dc_frequency)
+            dc_all_frequency_df_vendor_complete[entry].update(dc_frequency)
+            outliers_results_vendor = get_outliers(df_results_vendor, sollwerte_transposed)
+            outliers_results_sorted_vendor = sort_outliers(outliers_results_vendor, df_results_frequency_vendor)
+            outliers_results_vendor_frame = outliers_results_sorted_vendor.to_frame()
+            sorted_counts_vendor, high_frequency_numbers_vendor = sort_numbers_by_position(outliers_results_vendor_frame, sollwerte_transposed, 0, threshold=3)
+            bad_vendors.append(high_frequency_numbers_vendor)
+            print(high_frequency_numbers_vendor)
+
+            for entry_high_frequency_numbers_vendor in high_frequency_numbers_vendor:
+                df_scorecard_dataframe.loc[count, 'Mandant'] = entry
+                df_scorecard_dataframe.loc[count, 'Lieferant'] = entry_high_frequency_numbers_vendor 
+                count += 1
+                
+            score_card[entry]  = high_frequency_numbers_vendor
+
+        for entry in list(set(df_results_debitor.index) - set(high_frequency_numbers_debitor)):
+            dc_sorted_df_vendor_complete[entry] = {}
+            dc_all_results_df_vendor_complete[entry] = {}
+            dc_all_frequency_df_vendor_complete[entry] = {}
+
+            df_results_vendor, df_results_frequency_vendor, dc_sorted_df_vendor, dc_vendors,dc_frequency = get_data_values_complete_results(tenant, 'VENDOR_NUM', dc_sorted_df_debitor[entry])
+            dc_all_results_df_vendor_complete[entry].update(dc_vendors)
+            dc_sorted_df_vendor_complete[entry].update(dc_sorted_df_vendor)
+            dc_all_frequency_df_vendor_complete[entry].update(dc_frequency)
+
+        save_dc_to_json(dc_all_frequency_df_vendor_complete, 'results_complete_frequency_'+str(tenant)+'')
+        save_dc_to_json(dc_all_results_df_vendor_complete, 'results_complete_'+str(tenant)+'')
+        df_results_debitor["Mandant"] = df_results_debitor.index
+        df_results_debitor.to_json('data/'+str(tenant)+'/results_debitor_'+str(tenant)+'_.json', orient="records")
+                
+        df_table_ccvendors = get_table_data_ALL('CC_VENDORS', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''))
+        df_table_ccvendors_bank = get_table_data_ALL('CC_VENDOR_BANK', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''))
+
+        df_table_ccvendors = df_table_ccvendors.replace('\n',' ', regex=True)
+        df_table_ccvendors = df_table_ccvendors.replace('\r',' ', regex=True)
+        df_table_ccvendors_bank = df_table_ccvendors_bank.replace('\n',' ', regex=True)
+        df_table_ccvendors_bank = df_table_ccvendors_bank.replace('\r',' ', regex=True)
+
+        current_mandant = None
+        current_lieferant = None
+
+        # Schleife über die Spalten des DataFrames
+        for column in df_scorecard_dataframe.columns:
+            if column == 'Mandant':
+                current_mandant = df_scorecard_dataframe[column]
+            elif column == 'Lieferant':
+                current_lieferant = df_scorecard_dataframe[column]
+
+        i = 0
+
+        while i < len(current_mandant):
+            fehlercount = 0
+            wrong_documentids, error_codes = (check_for_eap_error(current_lieferant[i], current_mandant[i], dc_sorted_df_vendor_complete))
+            entry_wrong_number_vat_registration_id = df_table_ccvendors[(df_table_ccvendors['COMPANY_NUM'] == current_mandant[i]) & (df_table_ccvendors["VENDOR_NUM"] == current_lieferant[i])& ~(df_table_ccvendors["VENDOR_VAT_REGISTRATION_ID"] == '')]
+            entry_wrong_number_registration_id = df_table_ccvendors[(df_table_ccvendors['COMPANY_NUM'] == current_mandant[i]) & (df_table_ccvendors["VENDOR_NUM"] == current_lieferant[i])& ~(df_table_ccvendors["VENDOR_REGISTRATION_ID"] == '')] 
+            entry_wrong_number_iban = df_table_ccvendors_bank[(df_table_ccvendors_bank['COMPANY_NUM'] == current_mandant[i]) & (df_table_ccvendors_bank["VENDOR_NUM"] == current_lieferant[i])& ~(df_table_ccvendors_bank["IBAN"] == '')]
+            
+
+            if entry_wrong_number_vat_registration_id.empty: 
+                fehlercount += 100
+            if entry_wrong_number_registration_id.empty: 
+                fehlercount += 10
+            if entry_wrong_number_iban.empty: 
+                fehlercount += 1
+            
+            df_scorecard_dataframe.loc[i, 'Fehlercode'] = fehlercount
+            df_scorecard_dataframe.loc[i, 'DocumentID'] = wrong_documentids
+            df_scorecard_dataframe.loc[i, 'MissingCode'] = error_codes
+
+            i+=1
+
+        df_scorecard_dataframe.to_json('data/'+str(tenant)+'/scorecard_df_'+str(tenant)+'_.json', orient="records")
+        df_scorecard_dataframe = df_scorecard_dataframe.to_json(orient="records")
+
         df_table_cclogvariants = get_table_data_ALL('CCLOGVARIANTS', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''))
         df_table_cclogautotrain = get_table_data_CCLOGAUTOTRAIN('CCLOGAUTOTRAIN', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''),""+startdate+"",""+enddate+"")
 
@@ -483,43 +536,94 @@ def get_autotrain_results():
 
         df_table_cclogvariants = df_table_cclogvariants.drop(['ID', 'ATTRIB_STRUCTURE','DCMODULE_NAME'], axis=1)
         df_table_cclogvariants = df_table_cclogvariants.rename({'TRAINING_ID': 'ID'}, axis=1)
+
         merged_df = pd.merge(df_table_cclogautotrain, df_table_cclogvariants, on='ID')
         merged_df[['VENDOR', 'VENDOR_NUM', 'CHANGED_TYPE']] = merged_df['ATTRIB_PATH'].str.split('.', expand=True)
 
-        data_dict = merged_df.set_index('VENDOR_NUM').T.to_dict()
+        flat_dict = defaultdict(pd.DataFrame)
+        ergebnis_df = pd.DataFrame
 
+        for mandant, lieferanten_dict in dc_sorted_df_vendor_complete.items():
+            for lieferant, df in lieferanten_dict.items():
+                if not flat_dict[lieferant].empty:
+                    flat_dict[lieferant] = pd.concat([flat_dict[lieferant], df])
+                else:
+                    flat_dict[lieferant] = df
+                
+        flat_dict = dict(flat_dict)
+
+        for df_name, df in flat_dict.items():
+            print(df)
+            sorted_df = df.sort_values(by='LogTime', ascending=False)
+
+            unique_ids = []
+
+            for index, row in sorted_df.iterrows():
+                if row['DocumentID'] not in unique_ids:
+                    unique_ids.append(row['DocumentID'])
+                if len(unique_ids) == 5:
+                    break
+
+            def join_entries(entry_list):
+                return ','.join(entry_list) if entry_list else ''
+                
+            if str(df_name) in merged_df['VENDOR_NUM'].unique():
+                res = merged_df.index[merged_df['VENDOR_NUM'].isin({df_name})]
+                for item in res:
+                    merged_df.at[item, 'LastDocuments'] = join_entries(unique_ids)
+
+        data_dict = merged_df.set_index('VENDOR_NUM').T.to_dict()
         json_obj = {key: value for key, value in data_dict.items()}
 
-        save_file = open('data/autotrain_'+str(tenant)+'_.json', 'w')  
+        save_file = open('data/'+str(tenant)+'/autotrain_'+str(tenant)+'_.json', "w")  
         json.dump(json_obj, save_file, indent = 6)  
         save_file.close()  
-    return json_obj
 
-def get_results_from_json():
-    if(os.path.isfile('data/scorecard_df_'+str(tenant)+'_.json') == True):
-        with open('data/scorecard_df_'+str(tenant)+'_.json') as user_file:
+        x =  '{ "here":"1"}'
+
+        return x
+    else:
+        x =  '{ "here":"0"}'
+
+        return x
+        
+def get_autotrain_results():
+    if(os.path.isfile('data/'+str(tenant)+'/autotrain_'+str(tenant)+'_.json') == True):
+        with open('data/'+str(tenant)+'/autotrain_'+str(tenant)+'_.json') as user_file:
             file_contents = user_file.read()
         return file_contents
     else:
-        results = get_improvement_results()
-        print(results)
-        return results
+        return False
+
+
+def get_results_from_json():
+    if(os.path.isfile('data/'+str(tenant)+'/scorecard_df_'+str(tenant)+'_.json') == True):
+        with open('data/'+str(tenant)+'/scorecard_df_'+str(tenant)+'_.json') as user_file:
+            file_contents = user_file.read()
+        return file_contents
+    else:
+        return False
+
+
+
 
 def get_results_from_json_debitor():
-    with open('data/results_debitor.json') as user_file:
-        file_contents = user_file.read()
+    if(os.path.isfile('data/'+str(tenant)+'/results_debitor_'+str(tenant)+'_.json') == True):
+        with open('data/'+str(tenant)+'/results_debitor_'+str(tenant)+'_.json') as user_file:
+            file_contents = user_file.read()
 
-    return file_contents
-
+        return file_contents
+    else:
+        return False
 
 def get_results_from_json_complete():
-    with open('data/results_complete.json') as user_file:
+    with open('data/'+str(tenant)+'/results_complete_'+str(tenant)+'_.json') as user_file:
         file_contents = user_file.read()
 
     return file_contents
 
 def get_results_from_json_complete_frequency():
-    with open('data/results_complete_frequency.json') as user_file:
+    with open('data/'+str(tenant)+'/results_complete_frequency_'+str(tenant)+'_.json') as user_file:
         file_contents = user_file.read()
 
     return file_contents
@@ -566,70 +670,71 @@ def get_current_status():
     return x
 
 def get_debitor_results():
-    df = pd.read_csv('data/cclogattributes_T_'+tenant+'_reduced.csv', encoding='utf-8')
-    value = 0
-    len = 0
-    value, len = get_single_value(df, 'DEBITOR_NUM')
+    if (os.path.exists('data/'+str(tenant)+'/cclogattributes_T_'+tenant+'_reduced.csv')):
+        df = pd.read_csv('data/'+str(tenant)+'/cclogattributes_T_'+tenant+'_reduced.csv', encoding='utf-8')
+        value = 0
+        len = 0
+        value, len = get_single_value(df, 'DEBITOR_NUM')
 
-    score = '{"score":"'+str(value)+'","frequency":"'+str(len)+'"}'
-    if(value < 0.93):
-        global critical
-        critical += 1
+        score = '{"score":"'+str(value)+'","frequency":"'+str(len)+'"}'
+        if(value < 0.93):
+            global critical
+            critical += 1
 
-    return score
+        return score
 
 def get_vendor_results():
-    df = pd.read_csv('data/cclogattributes_T_'+tenant+'_reduced.csv', encoding='utf-8')
-    value = 0
-    len = 0
-    value, len = get_single_value(df, 'VENDOR_NUM')
-    score = '{"score":"'+str(value)+'","frequency":"'+str(len)+'"}'
+    if (os.path.exists('data/'+str(tenant)+'/cclogattributes_T_'+tenant+'_reduced.csv')):
+        df = pd.read_csv('data/'+str(tenant)+'/cclogattributes_T_'+tenant+'_reduced.csv', encoding='utf-8')
+        value = 0
+        len = 0
+        value, len = get_single_value(df, 'VENDOR_NUM')
+        score = '{"score":"'+str(value)+'","frequency":"'+str(len)+'"}'
 
-    if(value < 0.90):
-        global critical
-        critical += 1
-    return score
+        if(value < 0.90):
+            global critical
+            critical += 1
+        return score
 
 
 def get_pos_results():
-    df = pd.read_csv('data/cclogattributes_T_'+tenant+'_reduced.csv', encoding='utf-8')
-    df_sorted = df.sort_values(by='DocumentID')
-    attribute_names = ['VatAmount1', 'NetAmount1', 'VatRate1', 'InvoiceNumber', 'InvoiceDate']
-    filtered_df = df_sorted[(df_sorted['Attribute_Name'].isin(attribute_names)) & (df_sorted['Delta'] == True)]
-    grouped_df = filtered_df.groupby(df_sorted['DocumentID'].ne(df_sorted['DocumentID'].shift()).cumsum())
+    if (os.path.exists('data/'+str(tenant)+'/cclogattributes_T_'+tenant+'_reduced.csv')):
+        df = pd.read_csv('data/'+str(tenant)+'/cclogattributes_T_'+tenant+'_reduced.csv', encoding='utf-8')
+        df_sorted = df.sort_values(by='DocumentID')
+        attribute_names = ['VatAmount1', 'NetAmount1', 'VatRate1', 'InvoiceNumber', 'InvoiceDate']
+        filtered_df = df_sorted[(df_sorted['Attribute_Name'].isin(attribute_names)) & (df_sorted['Delta'] == True)]
+        grouped_df = filtered_df.groupby(df_sorted['DocumentID'].ne(df_sorted['DocumentID'].shift()).cumsum())
 
-    count_per_group = grouped_df.size()
-    bad_documents = len(count_per_group)
-    whole_documents = df_sorted['DocumentID'].nunique()
-    value = 1-(bad_documents/whole_documents)
-    good_documents = whole_documents-bad_documents
-    score = '{"score":"'+str(value)+'","frequency":"'+str(whole_documents)+'"}'
-    if(value < 0.80):
-        global critical
-        critical += 1
-    return score
+        count_per_group = grouped_df.size()
+        bad_documents = len(count_per_group)
+        whole_documents = df_sorted['DocumentID'].nunique()
+        value = 1-(bad_documents/whole_documents)
+        good_documents = whole_documents-bad_documents
+        score = '{"score":"'+str(value)+'","frequency":"'+str(whole_documents)+'"}'
+        if(value < 0.80):
+            global critical
+            critical += 1
+        return score
 
 def get_smart_invoice_error():
-    df = pd.read_csv('data/cclogattributes_T_'+tenant+'_reduced.csv', encoding='utf-8')
-    df_sorted_without_vendor_bad = df[~((df['Attribute_Name'] == 'VENDOR_NUM') & (df['Delta'] == True))]
-    df_sorted_without_vendor_bad = df_sorted_without_vendor_bad[df_sorted_without_vendor_bad['DocumentID'].isin(df_sorted_without_vendor_bad[df_sorted_without_vendor_bad['Attribute_Name'] == 'VENDOR_NUM']['DocumentID'])]
-    attribute_names = ['InvoiceDate','InvoiceNumber','GrossAmount']
-    attribute_names_new = ['VatRate1','NetAmount1','VatAmount1']
-    filtered_df = df_sorted_without_vendor_bad[(df_sorted_without_vendor_bad['Attribute_Name'].isin(attribute_names)) & (df_sorted_without_vendor_bad['Delta'] == True)]
-    grouped_attributes = filtered_df.groupby('DocumentID')['Attribute_Name'].agg(lambda x: ', '.join(sorted(set(x))))
-    combination_counts = grouped_attributes.value_counts()
-    x = filtered_df['Attribute_Name'].value_counts()
+    if (os.path.exists('data/'+str(tenant)+'/cclogattributes_T_'+tenant+'_reduced.csv')):
+        df = pd.read_csv('data/'+str(tenant)+'/cclogattributes_T_'+tenant+'_reduced.csv', encoding='utf-8')
+        df_sorted_without_vendor_bad = df[~((df['Attribute_Name'] == 'VENDOR_NUM') & (df['Delta'] == True))]
+        df_sorted_without_vendor_bad = df_sorted_without_vendor_bad[df_sorted_without_vendor_bad['DocumentID'].isin(df_sorted_without_vendor_bad[df_sorted_without_vendor_bad['Attribute_Name'] == 'VENDOR_NUM']['DocumentID'])]
+        attribute_names = ['InvoiceDate','InvoiceNumber','GrossAmount']
+        attribute_names_new = ['VatRate1','NetAmount1','VatAmount1']
+        filtered_df = df_sorted_without_vendor_bad[(df_sorted_without_vendor_bad['Attribute_Name'].isin(attribute_names)) & (df_sorted_without_vendor_bad['Delta'] == True)]
+        grouped_attributes = filtered_df.groupby('DocumentID')['Attribute_Name'].agg(lambda x: ', '.join(sorted(set(x))))
+        combination_counts = grouped_attributes.value_counts()
+        x = filtered_df['Attribute_Name'].value_counts()
 
-    grouped_df = filtered_df.groupby(df_sorted_without_vendor_bad['DocumentID'].ne(df_sorted_without_vendor_bad['DocumentID'].shift()).cumsum())
-    count_per_group = grouped_df.size()
-    bad_documents = len(count_per_group)
-    whole_documents = df_sorted_without_vendor_bad['DocumentID'].nunique()
-    value = (x[0]/whole_documents)
-    good_documents = whole_documents-bad_documents
-    
-    score = '{"score":"'+str(value)+'","frequency":"'+str(whole_documents)+'"}'
-    print(score)
-    return score
-
-if __name__ == "__main__":
-    get_improvement_results()
+        grouped_df = filtered_df.groupby(df_sorted_without_vendor_bad['DocumentID'].ne(df_sorted_without_vendor_bad['DocumentID'].shift()).cumsum())
+        count_per_group = grouped_df.size()
+        bad_documents = len(count_per_group)
+        whole_documents = df_sorted_without_vendor_bad['DocumentID'].nunique()
+        value = (x[0]/whole_documents)
+        good_documents = whole_documents-bad_documents
+        
+        score = '{"score":"'+str(value)+'","frequency":"'+str(whole_documents)+'"}'
+        print(score)
+        return score
