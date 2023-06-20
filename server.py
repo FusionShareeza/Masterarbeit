@@ -43,8 +43,20 @@ def get_pos_results_func():
     return jsonify(results)
 
 @app.route('/smartinvoice', methods=['GET'])
-def get_smart_invoice_error_fun():
+def get_smart_invoice_error_func():
     results = get_smart_invoice_error()
+    print(results)
+    return jsonify(results)
+
+@app.route('/doubleiban', methods=['GET'])
+def get_double_iban_error_func():
+    results = get_double_iban_error()
+    return jsonify(results)
+
+
+@app.route('/smartinvoice_distribution', methods=['GET'])
+def get_smart_invoice_error_distribution_func():
+    results = get_smart_invoice_error_distribution()
     print(results)
     return jsonify(results)
 
@@ -78,6 +90,12 @@ def get_sollwerte_verbesserungen_func():
 def get_autotrain_results_func():
     results = get_autotrain_results()
     return jsonify(results)
+
+@app.route('/results_table', methods=['GET'])
+def get_results_table_func():
+    results = get_results_table()
+    return jsonify(results)
+
 
 
 if __name__ == '__main__':

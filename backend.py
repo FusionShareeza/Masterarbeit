@@ -32,14 +32,16 @@ from collections import Counter
 from collections import defaultdict
 from datetime import datetime 
 
-tenant = '0001ai'
+tenant = '0006sg'
 path = 'data/'+tenant+''
+startdate = "'2022-12-20 09:44:23.030'"
+enddate = "'2023-06-18 12:28:20.000'"
 try: 
     os.mkdir(path) 
 except: 
     print('schon da') 
 
-critical = 0
+critical = -1
 
 def connect_to_db_better(connection_string,
                     database,
@@ -452,9 +454,6 @@ def get_improvement_results():
         sollwerte = pd.read_csv('data/sollwerte.csv', encoding='utf-8')
         sollwerte_transposed = sollwerte.set_index('Unnamed: 0').T
 
-        startdate = "'2022-12-20 09:44:23.030'"
-        enddate = "'2023-05-31 12:28:20.000'"
-
         df_table_cclogattributes = get_table_data_CCLOG('CCLogAttributes', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+'')
                                                 ,""+startdate+"",""+enddate+"")
         df_table_cclogattributes = df_table_cclogattributes.drop(['Zone','Attribute_DataType','LogTimeTicks'], axis=1)
@@ -708,6 +707,58 @@ def get_commments_from_sollwerte():
 
     return json_string
 
+def update_csv(log, value1=None, value2=None, value3=None):
+    csv_filename = 'data/'+str(tenant)+'/log_'+str(tenant)+'_.csv'
+    logtime_exists = False
+    rows = []
+
+    # Überprüfen, ob die CSV-Datei existiert
+    if not os.path.exists(csv_filename):
+        # CSV-Datei erstellen
+        with open(csv_filename, "w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(["Logtime", "ValueMandant", "ValueLieferant", "ValueRechnungskopf"])
+
+    # CSV-Datei vollständig einlesen
+    with open(csv_filename, "r", newline="") as file:
+        reader = csv.reader(file)
+        rows = list(reader)
+
+    # Überprüfen, ob Logtime bereits vorhanden ist
+    for row in rows:
+        if row and row[0] == log:
+            logtime_exists = True
+            if value1 is not None:
+                row[1] = str(value1)  # Wert1 aktualisieren
+            if value2 is not None:
+                row[2] = str(value2)  # Wert2 aktualisieren
+            if value3 is not None:
+                row[3] = str(value3)  # Wert3 aktualisieren
+            break
+
+    # Wenn Logtime nicht vorhanden ist, neue Zeile hinzufügen
+    if not logtime_exists:
+        new_row = [log]
+        if value1 is not None:
+            new_row.append(str(value1))
+        else:
+            new_row.append("")
+        if value2 is not None:
+            new_row.append(str(value2))
+        else:
+            new_row.append("")
+        if value3 is not None:
+            new_row.append(str(value3))
+        else:
+            new_row.append("")
+        rows.append(new_row)
+
+    # CSV-Datei aktualisieren
+    with open(csv_filename, "w", newline="") as outfile:
+        writer = csv.writer(outfile)
+        writer.writerows(rows)
+    
+
 def get_current_status():
     global critical
 
@@ -728,6 +779,8 @@ def get_debitor_results():
         len = 0
         value, len = get_single_value(df, 'DEBITOR_NUM')
 
+        update_csv(enddate, value1=value)
+
         score = '{"score":"'+str(value)+'","frequency":"'+str(len)+'"}'
         if(value < 0.93):
             global critical
@@ -742,6 +795,8 @@ def get_vendor_results():
         len = 0
         value, len = get_single_value(df, 'VENDOR_NUM')
         score = '{"score":"'+str(value)+'","frequency":"'+str(len)+'"}'
+
+        update_csv(enddate, value2=value)
 
         if(value < 0.90):
             global critical
@@ -761,12 +816,37 @@ def get_pos_results():
         bad_documents = len(count_per_group)
         whole_documents = df_sorted['DocumentID'].nunique()
         value = 1-(bad_documents/whole_documents)
+        update_csv(enddate, value3=value)
+
         good_documents = whole_documents-bad_documents
         score = '{"score":"'+str(value)+'","frequency":"'+str(whole_documents)+'"}'
+
         if(value < 0.80):
             global critical
             critical += 1
         return score
+    
+def get_results_table():
+    csvFilePath = 'data/'+str(tenant)+'/log_'+str(tenant)+'_.csv'
+    jsonFilePath = 'data/'+str(tenant)+'/table_data'+str(tenant)+'_.json'
+
+    data = {}
+        
+    with open(csvFilePath, encoding='utf-8') as csvf:
+        csvReader = csv.DictReader(csvf)
+            
+        for rows in csvReader:
+            key = rows['Logtime']
+            data[key] = rows
+
+
+    with open(jsonFilePath, 'w', encoding='utf-8') as jsonf:
+        jsonf.write(json.dumps(data, indent=4))
+    
+    with open('data/'+str(tenant)+'/table_data'+str(tenant)+'_.json') as user_file:
+        file_contents = user_file.read()
+
+    return file_contents
 
 def get_smart_invoice_error():
     if (os.path.exists('data/'+str(tenant)+'/cclogattributes_T_'+tenant+'_reduced.csv')):
@@ -775,18 +855,66 @@ def get_smart_invoice_error():
         df_sorted_without_vendor_bad = df_sorted_without_vendor_bad[df_sorted_without_vendor_bad['DocumentID'].isin(df_sorted_without_vendor_bad[df_sorted_without_vendor_bad['Attribute_Name'] == 'VENDOR_NUM']['DocumentID'])]
         attribute_names = ['InvoiceDate','InvoiceNumber','GrossAmount']
         attribute_names_new = ['VatRate1','NetAmount1','VatAmount1']
-        filtered_df = df_sorted_without_vendor_bad[(df_sorted_without_vendor_bad['Attribute_Name'].isin(attribute_names)) & (df_sorted_without_vendor_bad['Delta'] == True)]
-        grouped_attributes = filtered_df.groupby('DocumentID')['Attribute_Name'].agg(lambda x: ', '.join(sorted(set(x))))
-        combination_counts = grouped_attributes.value_counts()
-        x = filtered_df['Attribute_Name'].value_counts()
 
-        grouped_df = filtered_df.groupby(df_sorted_without_vendor_bad['DocumentID'].ne(df_sorted_without_vendor_bad['DocumentID'].shift()).cumsum())
-        count_per_group = grouped_df.size()
-        bad_documents = len(count_per_group)
-        whole_documents = df_sorted_without_vendor_bad['DocumentID'].nunique()
-        value = (x[0]/whole_documents)
-        good_documents = whole_documents-bad_documents
+        def get_score(attributes):
+            filtered_df = df_sorted_without_vendor_bad[(df_sorted_without_vendor_bad['Attribute_Name'].isin(attributes)) & (df_sorted_without_vendor_bad['Delta'] == True)]
+            grouped_attributes = filtered_df.groupby('DocumentID')['Attribute_Name'].agg(lambda x: ', '.join(sorted(set(x))))
+            combination_counts = grouped_attributes.value_counts()
+            x = filtered_df['Attribute_Name'].value_counts()
+            grouped_df = filtered_df.groupby(df_sorted_without_vendor_bad['DocumentID'].ne(df_sorted_without_vendor_bad['DocumentID'].shift()).cumsum())
+            count_per_group = grouped_df.size()
+            bad_documents = len(count_per_group)
+            whole_documents = df_sorted_without_vendor_bad['DocumentID'].nunique()
+            value = (x[0]/whole_documents)
+            good_documents = whole_documents-bad_documents
+
+            score = '{"score":"'+str(value)+'","frequency":"'+str(whole_documents)+'"}'
+
+            if(value <= 0.03):
+                global critical
+                critical += 1
+
+            print(score)
+            return score, x
         
-        score = '{"score":"'+str(value)+'","frequency":"'+str(whole_documents)+'"}'
-        print(score)
+        score, x = get_score(attribute_names)
+        score2, y = get_score(attribute_names_new)
+                
+        df = pd.concat([x, y], axis=0).to_frame()
+        df['Attribute_Name'].to_json('data/'+str(tenant)+'/smartinvoice_distribution_'+str(tenant)+'_.json', orient="index")
         return score
+
+def get_double_iban_error():
+    if not os.path.isfile('./data/'+str(tenant)+'/ccvendors_bank'+tenant+'_.csv'):
+
+        df_table_ccvendors_bank = get_table_data_ALL('CC_VENDOR_BANK', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''))
+
+        df_table_ccvendors_bank = df_table_ccvendors_bank.replace('\n',' ', regex=True)
+        df_table_ccvendors_bank = df_table_ccvendors_bank.replace('\r',' ', regex=True)
+        df_table_ccvendors_bank.to_csv('./data/'+str(tenant)+'/ccvendors_bank'+tenant+'_.csv', index=False, header= True, encoding='utf-8')
+
+    else:
+        df_table_ccvendors_bank = pd.read_csv('./data/'+str(tenant)+'/ccvendors_bank'+tenant+'_.csv', encoding='utf-8')
+
+    grouped = df_table_ccvendors_bank.groupby(['IBAN', 'COMPANY_NUM'])
+
+    filtered_groups = grouped.filter(lambda x: len(x['VENDOR_NUM'].unique()) > 1)
+
+    unique_combinations = filtered_groups.groupby(['IBAN', 'COMPANY_NUM', 'VENDOR_NUM']).size().reset_index(name='Anzahl')
+    laenge = len(unique_combinations.index)
+
+    unique_combinations = unique_combinations.drop('Anzahl', axis=1)
+    out = unique_combinations.to_json(orient='records')
+
+    score = '{"frequency":"'+str(laenge)+'","data":'+out+'}'
+
+    if (laenge > 1):
+        return score
+    else: 
+        return False, False
+  
+def get_smart_invoice_error_distribution():
+    with open('data/'+str(tenant)+'/smartinvoice_distribution_'+str(tenant)+'_.json') as user_file:
+        file_contents = user_file.read()
+
+    return file_contents
