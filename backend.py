@@ -32,14 +32,23 @@ from collections import Counter
 from collections import defaultdict
 from datetime import datetime 
 
-tenant = '0006sg'
+tenant = '0001ai'
 path = 'data/'+tenant+''
-startdate = "'2022-12-20 09:44:23.030'"
-enddate = "'2023-06-18 12:28:20.000'"
+startdate = "'2022-11-01 09:44:23.030'"
+enddate = "'2023-06-21 13:28:20.000'"
+
 try: 
     os.mkdir(path) 
 except: 
     print('schon da') 
+
+if(os.path.exists('data/'+str(tenant)+'/log_'+str(tenant)+'_.csv')  == True):
+    print('log da')
+else:
+    with open('data/'+str(tenant)+'/log_'+str(tenant)+'_.csv', "w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(["Logtime", "ValueMandant", "ValueLieferant", "ValueRechnungskopf"])
+    print('log erstellt')
 
 critical = -1
 
@@ -101,7 +110,7 @@ def filter_df_by_time(df, start_date, end_date):
     filtered_df = df[(df['LogTime'] >= start_date) & (df['LogTime'] <= end_date)]  
     df_new = filtered_df.drop(['LogTime'], axis =1)
     # Rückgabe des gefilterten DataFrames
-    df_new.to_csv('data/cclogattributes_T_'+tenant+'_reduced.csv', index=False, header= True, encoding='utf-8')#iso-8859-15
+    df_new.to_csv('data/'+str(tenant)+'/cclogattributes_T_'+tenant+'_.csv', index=False, header= True, encoding='utf-8')
     return df_new
 
 def get_data_values2(df, items): 
@@ -447,9 +456,8 @@ def check_distribution(df, changed_type, stop_time ):
 
     return distribution_before, distribution_after
 
-
 def get_improvement_results():
-    if not os.path.isfile('data/'+str(tenant)+'/autotrain_'+str(tenant)+'_.json') or not os.path.isfile('data/'+str(tenant)+'/scorecard_df_'+str(tenant)+'_.json') or not os.path.isfile('data/'+str(tenant)+'/results_complete_frequency_'+str(tenant)+'_.json'):
+    if not os.path.isfile('data/'+str(tenant)+'/scorecard_df_'+str(tenant)+'_.json') or not os.path.isfile('data/'+str(tenant)+'/results_complete_frequency_'+str(tenant)+'_.json'):
         print("bin drin ")
         sollwerte = pd.read_csv('data/sollwerte.csv', encoding='utf-8')
         sollwerte_transposed = sollwerte.set_index('Unnamed: 0').T
@@ -493,6 +501,7 @@ def get_improvement_results():
             outliers_results_vendor_frame = outliers_results_sorted_vendor.to_frame()
             sorted_counts_vendor, high_frequency_numbers_vendor = sort_numbers_by_position(outliers_results_vendor_frame, sollwerte_transposed, 0, threshold=3)
             bad_vendors.append(high_frequency_numbers_vendor)
+            print(entry)
             print(high_frequency_numbers_vendor)
 
             for entry_high_frequency_numbers_vendor in high_frequency_numbers_vendor:
@@ -506,7 +515,6 @@ def get_improvement_results():
             dc_sorted_df_vendor_complete[entry] = {}
             dc_all_results_df_vendor_complete[entry] = {}
             dc_all_frequency_df_vendor_complete[entry] = {}
-
             df_results_vendor, df_results_frequency_vendor, dc_sorted_df_vendor, dc_vendors,dc_frequency = get_data_values_complete_results(tenant, 'VENDOR_NUM', dc_sorted_df_debitor[entry])
             dc_all_results_df_vendor_complete[entry].update(dc_vendors)
             dc_sorted_df_vendor_complete[entry].update(dc_sorted_df_vendor)
@@ -561,6 +569,17 @@ def get_improvement_results():
         df_scorecard_dataframe.to_json('data/'+str(tenant)+'/scorecard_df_'+str(tenant)+'_.json', orient="records")
         df_scorecard_dataframe = df_scorecard_dataframe.to_json(orient="records")
 
+        get_autotrain_variants(dc_sorted_df_vendor_complete)
+        x =  '{ "here":"1"}'
+
+        return x
+    else:
+        x =  '{ "here":"0"}'
+
+        return x
+        
+
+def get_autotrain_variants(dc_sorted_df_vendor_complete):
         df_table_cclogvariants = get_table_data_ALL('CCLOGVARIANTS', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''))
         df_table_cclogautotrain = get_table_data_CCLOGAUTOTRAIN('CCLOGAUTOTRAIN', connect_to_db_better(connection_string= 'classconprocessingger.database.windows.net', database = 'T_'+tenant+''),""+startdate+"",""+enddate+"")
 
@@ -573,71 +592,68 @@ def get_improvement_results():
         df_table_cclogvariants = df_table_cclogvariants.rename({'TRAINING_ID': 'ID'}, axis=1)
 
         merged_df = pd.merge(df_table_cclogautotrain, df_table_cclogvariants, on='ID')
-        merged_df[['VENDOR', 'VENDOR_NUM', 'CHANGED_TYPE']] = merged_df['ATTRIB_PATH'].str.split('.', expand=True)
+        if(merged_df.empty == False):
+            merged_df[['VENDOR', 'VENDOR_NUM', 'CHANGED_TYPE']] = merged_df['ATTRIB_PATH'].str.split('.', expand=True)
 
-        flat_dict = defaultdict(pd.DataFrame)
-        ergebnis_df = pd.DataFrame
+            flat_dict = defaultdict(pd.DataFrame)
+            ergebnis_df = pd.DataFrame
 
-        for mandant, lieferanten_dict in dc_sorted_df_vendor_complete.items():
-            for lieferant, df in lieferanten_dict.items():
-                if not flat_dict[lieferant].empty:
-                    flat_dict[lieferant] = pd.concat([flat_dict[lieferant], df])
-                else:
-                    flat_dict[lieferant] = df
-                
-        flat_dict = dict(flat_dict)
+            for mandant, lieferanten_dict in dc_sorted_df_vendor_complete.items():
+                for lieferant, df in lieferanten_dict.items():
+                    if not flat_dict[lieferant].empty:
+                        flat_dict[lieferant] = pd.concat([flat_dict[lieferant], df])
+                    else:
+                        flat_dict[lieferant] = df
+                    
+            flat_dict = dict(flat_dict)
 
-        for df_name, df in flat_dict.items():
-            sorted_df = df.sort_values(by='LogTime', ascending=False)
-            unique_ids = []
-
-
-            for index, row in sorted_df.iterrows():
-                if row['DocumentID'] not in unique_ids:
-                    unique_ids.append(row['DocumentID'])
-                if len(unique_ids) == 5:
-                    break
-
-            def join_entries(entry_list):
-                return ','.join(entry_list) if entry_list else ''
-                
-            if str(df_name) in merged_df['VENDOR_NUM'].unique():
-                print(df_name)
-                y = merged_df[merged_df['VENDOR_NUM'] == df_name]
-                if 'inserted' in y['STATUS'].unique(): 
-                    stop_time = y['STOP_TIME']
-                    changed_type = y['CHANGED_TYPE']
-                    for item, item2 in zip(stop_time, changed_type):
-                        x = merged_df[merged_df['CHANGED_TYPE'] == item2]
-                        score_before, score_after = check_distribution(df, item2, item )
-                        abc = y.index
-                    for thing in abc:
-                        merged_df.at[thing, 'ScoreBefore'] = score_before[0]
-                        merged_df.at[thing, 'ScoreAfter'] = score_after[0]
-                        merged_df.at[thing, 'FrequencyBefore'] = score_before[1]
-                        merged_df.at[thing, 'FrequencyAfter'] = score_after[1]
+            for df_name, df in flat_dict.items():
+                sorted_df = df.sort_values(by='LogTime', ascending=False)
+                unique_ids = []
 
 
-                res = merged_df.index[merged_df['VENDOR_NUM'].isin({df_name})]
-                for item in res:
-                    merged_df.at[item, 'LastDocuments'] = join_entries(unique_ids)
+                for index, row in sorted_df.iterrows():
+                    if row['DocumentID'] not in unique_ids:
+                        unique_ids.append(row['DocumentID'])
+                    if len(unique_ids) == 5:
+                        break
 
-        merged_df = merged_df.replace({np.nan: None})
-        data_dict = merged_df.set_index('VENDOR_NUM').T.to_dict()
-        json_obj = {key: value for key, value in data_dict.items()}
+                def join_entries(entry_list):
+                    return ','.join(entry_list) if entry_list else ''
+                    
+                if str(df_name) in merged_df['VENDOR_NUM'].unique():
+                    print(df_name)
+                    y = merged_df[merged_df['VENDOR_NUM'] == df_name]
+                    if 'inserted' in y['STATUS'].unique(): 
+                        stop_time = y['STOP_TIME']
+                        changed_type = y['CHANGED_TYPE']
+                        for item, item2 in zip(stop_time, changed_type):
+                            x = merged_df[merged_df['CHANGED_TYPE'] == item2]
+                            score_before, score_after = check_distribution(df, item2, item )
+                            abc = y.index
+                        for thing in abc:
+                            merged_df.at[thing, 'ScoreBefore'] = score_before[0]
+                            merged_df.at[thing, 'ScoreAfter'] = score_after[0]
+                            merged_df.at[thing, 'FrequencyBefore'] = score_before[1]
+                            merged_df.at[thing, 'FrequencyAfter'] = score_after[1]
 
-        save_file = open('data/'+str(tenant)+'/autotrain_'+str(tenant)+'_.json', "w")  
-        json.dump(json_obj, save_file, indent = 6, allow_nan=True)  
-        save_file.close()  
 
-        x =  '{ "here":"1"}'
+                    res = merged_df.index[merged_df['VENDOR_NUM'].isin({df_name})]
+                    for item in res:
+                        merged_df.at[item, 'LastDocuments'] = join_entries(unique_ids)
 
-        return x
-    else:
-        x =  '{ "here":"0"}'
+            merged_df = merged_df.replace({np.nan: None})
+            data_dict = merged_df.set_index('VENDOR_NUM').T.to_dict()
+            json_obj = {key: value for key, value in data_dict.items()}
+            #display(merged_df)
+            save_file = open("data/savedata.json", "w")  
+            json.dump(json_obj, save_file, indent = 6)  
+            save_file.close()
+        else:
+            print("Keine Autotrainer Daten")  
 
-        return x
-        
+
+
 def get_autotrain_results():
     if(os.path.isfile('data/'+str(tenant)+'/autotrain_'+str(tenant)+'_.json') == True):
         with open('data/'+str(tenant)+'/autotrain_'+str(tenant)+'_.json') as user_file:
@@ -711,13 +727,6 @@ def update_csv(log, value1=None, value2=None, value3=None):
     csv_filename = 'data/'+str(tenant)+'/log_'+str(tenant)+'_.csv'
     logtime_exists = False
     rows = []
-
-    # Überprüfen, ob die CSV-Datei existiert
-    if not os.path.exists(csv_filename):
-        # CSV-Datei erstellen
-        with open(csv_filename, "w", newline="") as file:
-            writer = csv.writer(file)
-            writer.writerow(["Logtime", "ValueMandant", "ValueLieferant", "ValueRechnungskopf"])
 
     # CSV-Datei vollständig einlesen
     with open(csv_filename, "r", newline="") as file:
@@ -867,7 +876,7 @@ def get_smart_invoice_error():
             whole_documents = df_sorted_without_vendor_bad['DocumentID'].nunique()
             value = (x[0]/whole_documents)
             good_documents = whole_documents-bad_documents
-
+            print(good_documents)
             score = '{"score":"'+str(value)+'","frequency":"'+str(whole_documents)+'"}'
 
             if(value <= 0.03):
@@ -883,6 +892,7 @@ def get_smart_invoice_error():
         df = pd.concat([x, y], axis=0).to_frame()
         df['Attribute_Name'].to_json('data/'+str(tenant)+'/smartinvoice_distribution_'+str(tenant)+'_.json', orient="index")
         return score
+    
 
 def get_double_iban_error():
     if not os.path.isfile('./data/'+str(tenant)+'/ccvendors_bank'+tenant+'_.csv'):
