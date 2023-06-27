@@ -32,7 +32,7 @@ from collections import Counter
 from collections import defaultdict
 from datetime import datetime 
 
-tenant = '0001ai'
+tenant = '0006in'
 path = 'data/'+tenant+''
 startdate = "'2022-11-01 09:44:23.030'"
 enddate = "'2023-06-21 13:28:20.000'"
@@ -484,7 +484,7 @@ def get_improvement_results():
         outliers_results_sorted_debitor = sort_outliers(outliers_results, df_results_frequency)
         outliers_results_debitor_frame = outliers_results_sorted_debitor.to_frame()
         sorted_counts, high_frequency_numbers_debitor = sort_numbers_by_position(outliers_results_debitor_frame, sollwerte_transposed,0, threshold=3)
-
+        print("jetzt hier")
         bad_vendors = []
         count = 0
         for entry in high_frequency_numbers_debitor:
@@ -646,7 +646,7 @@ def get_autotrain_variants(dc_sorted_df_vendor_complete):
             data_dict = merged_df.set_index('VENDOR_NUM').T.to_dict()
             json_obj = {key: value for key, value in data_dict.items()}
             #display(merged_df)
-            save_file = open("data/savedata.json", "w")  
+            save_file = open('data/'+str(tenant)+'/autotrain_'+str(tenant)+'_.json', "w")  
             json.dump(json_obj, save_file, indent = 6)  
             save_file.close()
         else:
