@@ -96,7 +96,11 @@ def get_results_table_func():
     results = get_results_table()
     return jsonify(results)
 
-
+@app.route('/pos_ven_results', methods=['GET'])
+def get_pos_ven_debitor_results_func():
+    results = get_pos_ven_debitor_results()
+    print(results)
+    return jsonify(results)
 
 if __name__ == '__main__':
    app.run(port=5002)

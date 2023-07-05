@@ -32,10 +32,10 @@ from collections import Counter
 from collections import defaultdict
 from datetime import datetime 
 
-tenant = '0009a5'
+tenant = '000git'
 path = 'data/'+tenant+''
-startdate = "'2022-11-01 09:44:23.030'"
-enddate = "'2023-06-21 13:28:20.000'"
+startdate = "'2023-06-02 09:44:23.030'"
+enddate = "'2023-07-05 08:28:20.000'"
 
 try: 
     os.mkdir(path) 
@@ -519,6 +519,80 @@ def get_improvement_results():
             dc_all_results_df_vendor_complete[entry].update(dc_vendors)
             dc_sorted_df_vendor_complete[entry].update(dc_sorted_df_vendor)
             dc_all_frequency_df_vendor_complete[entry].update(dc_frequency)
+        
+    
+        data = {}
+
+        for entry in df_results_debitor.index:
+            data[entry] = {}
+
+            df_blablie = pd.concat(dc_sorted_df_vendor_complete[entry], ignore_index=True)
+            df_sorted = df_blablie.sort_values(by='DocumentID')
+            attribute_names = ['VatAmount1', 'NetAmount1', 'VatRate1', 'InvoiceNumber', 'InvoiceDate']
+            filtered_df = df_sorted[(df_sorted['Attribute_Name'].isin(attribute_names)) & (df_sorted['Delta'] == True)]
+            grouped_df = filtered_df.groupby(df_sorted['DocumentID'].ne(df_sorted['DocumentID'].shift()).cumsum())
+
+            count_per_group = grouped_df.size()
+            bad_documents = len(count_per_group)
+            whole_documents = df_sorted['DocumentID'].nunique()
+            value_pos = 1-(bad_documents/whole_documents)
+            value_ven, laenge_ven = get_single_value(df_blablie, 'VENDOR_NUM')
+            value_invoice, laenge_invoice = get_single_value(df_blablie, 'InvoiceNumber')
+            value_invoicedate, laenge_invoicedate = get_single_value(df_blablie, 'InvoiceDate')
+            value_gross, laenge_gross = get_single_value(df_blablie, 'GrossAmount')
+            value_vatrate, laenge_vatrate = get_single_value(df_blablie, 'VatRate1')
+            value_netamount, laenge_netamount = get_single_value(df_blablie, 'NetAmount1')
+            value_vatamount, laenge_vatamount = get_single_value(df_blablie, 'VatAmount1')
+
+            data[entry]['score_pos'] = str(value_pos)
+            data[entry]['frequency_pos'] = str(whole_documents)
+            data[entry]['score_ven'] = str(value_ven)
+            data[entry]['frequency_ven'] = str(laenge_ven)
+            data[entry]['score_invoice'] = str(value_invoice)
+            data[entry]['score_invoicedate'] = str(value_invoicedate)
+            data[entry]['score_gross'] = str(value_gross)
+            data[entry]['score_vatrate'] = str(value_vatrate)
+            data[entry]['score_netamount'] = str(value_netamount)
+            data[entry]['score_vatamount'] = str(value_vatamount)
+            data[entry]['frequency_invoice'] = str(laenge_invoice)
+            data[entry]['frequency_invoicedate'] = str(laenge_invoicedate)
+            data[entry]['frequency_gross'] = str(laenge_gross)
+            data[entry]['frequency_vatrate'] = str(laenge_vatrate)
+            data[entry]['frequency_netamount'] = str(laenge_netamount)
+            data[entry]['frequency_vatamount'] = str(laenge_vatamount)
+
+
+            df_sorted_without_vendor_bad = df_blablie[~((df_blablie['Attribute_Name'] == 'VENDOR_NUM') & (df_blablie['Delta'] == True))]
+            df_sorted_without_vendor_bad = df_sorted_without_vendor_bad[df_sorted_without_vendor_bad['DocumentID'].isin(df_sorted_without_vendor_bad[df_sorted_without_vendor_bad['Attribute_Name'] == 'VENDOR_NUM']['DocumentID'])]
+            attribute_names = ['InvoiceDate','InvoiceNumber','GrossAmount']
+            attribute_names_new = ['VatRate1','NetAmount1','VatAmount1']
+
+            def get_score(attributes):
+                filtered_df = df_sorted_without_vendor_bad[(df_sorted_without_vendor_bad['Attribute_Name'].isin(attributes)) & (df_sorted_without_vendor_bad['Delta'] == True)]
+                grouped_attributes = filtered_df.groupby('DocumentID')['Attribute_Name'].agg(lambda x: ', '.join(sorted(set(x))))
+                combination_counts = grouped_attributes.value_counts()
+                x = filtered_df['Attribute_Name'].value_counts()
+                grouped_df = filtered_df.groupby(df_sorted_without_vendor_bad['DocumentID'].ne(df_sorted_without_vendor_bad['DocumentID'].shift()).cumsum())
+                count_per_group = grouped_df.size()
+                bad_documents = len(count_per_group)
+                whole_documents = df_sorted_without_vendor_bad['DocumentID'].nunique()
+                value = (x[0]/whole_documents)
+                good_documents = whole_documents-bad_documents
+                return value, whole_documents, x
+            
+
+            value_score_invoice_gross, document_score_invoice_gross , x = get_score(attribute_names)
+            value_score_net_vat, document_score_net_vat , y = get_score(attribute_names_new)
+            data[entry]['value_smart_invoice_gross'] = str(value_score_invoice_gross)
+            data[entry]['frequency_smart_invoice_gross'] = str(document_score_invoice_gross)
+            data[entry]['value_smart_net_vat'] = str(value_score_net_vat)
+            data[entry]['frequency_smart_net_vat'] = str(document_score_net_vat)
+            df_distro = pd.concat([x, y], axis=0).to_frame()
+            distro = df_distro['Attribute_Name'].to_json(orient="index")
+            json_dict = json.loads(distro)
+            data[entry]['distribution_smart'] = json_dict
+
+            updated_json_string = json.dumps(data)
 
         save_dc_to_json(dc_all_frequency_df_vendor_complete, 'results_complete_frequency_'+str(tenant)+'')
         save_dc_to_json(dc_all_results_df_vendor_complete, 'results_complete_'+str(tenant)+'')
@@ -544,7 +618,6 @@ def get_improvement_results():
                 current_lieferant = df_scorecard_dataframe[column]
 
         i = 0
-
         while i < len(current_mandant):
             fehlercount = 0
             wrong_documentids, error_codes = (check_for_eap_error(current_lieferant[i], current_mandant[i], dc_sorted_df_vendor_complete))
@@ -563,8 +636,13 @@ def get_improvement_results():
             df_scorecard_dataframe.loc[i, 'Fehlercode'] = fehlercount
             df_scorecard_dataframe.loc[i, 'DocumentID'] = wrong_documentids
             df_scorecard_dataframe.loc[i, 'MissingCode'] = error_codes
-
             i+=1
+
+        json_objekt = json.loads(updated_json_string)
+        dateipfad = 'data/'+str(tenant)+'/pos_ven_debitor'+str(tenant)+'_.json'
+        # JSON-Objekt in die JSON-Datei schreiben
+        with open(dateipfad, 'w') as datei:
+            json.dump(json_objekt, datei)
 
         df_scorecard_dataframe.to_json('data/'+str(tenant)+'/scorecard_df_'+str(tenant)+'_.json', orient="records")
         df_scorecard_dataframe = df_scorecard_dataframe.to_json(orient="records")
@@ -657,6 +735,14 @@ def get_autotrain_variants(dc_sorted_df_vendor_complete):
 def get_autotrain_results():
     if(os.path.isfile('data/'+str(tenant)+'/autotrain_'+str(tenant)+'_.json') == True):
         with open('data/'+str(tenant)+'/autotrain_'+str(tenant)+'_.json') as user_file:
+            file_contents = user_file.read()
+        return file_contents
+    else:
+        return False
+
+def get_pos_ven_debitor_results():
+    if(os.path.isfile('data/'+str(tenant)+'/pos_ven_debitor'+str(tenant)+'_.json') == True):
+        with open('data/'+str(tenant)+'/pos_ven_debitor'+str(tenant)+'_.json') as user_file:
             file_contents = user_file.read()
         return file_contents
     else:
@@ -891,7 +977,7 @@ def get_smart_invoice_error():
                 
         df = pd.concat([x, y], axis=0).to_frame()
         df['Attribute_Name'].to_json('data/'+str(tenant)+'/smartinvoice_distribution_'+str(tenant)+'_.json', orient="index")
-        return score
+        return score2
     
 
 def get_double_iban_error():
