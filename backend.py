@@ -34,8 +34,8 @@ from datetime import datetime
 
 tenant = '000git'
 path = 'data/'+tenant+''
-startdate = "'2023-06-02 09:44:23.030'"
-enddate = "'2023-07-05 08:28:20.000'"
+startdate = "'2023-07-05 09:44:23.030'"
+enddate = "'2023-07-12 08:28:20.000'"
 
 try: 
     os.mkdir(path) 
@@ -408,28 +408,35 @@ def check_for_eap_error(vendor_num, debitor, dc_sorted_df_vendor_complete):
         df_sort_new = df_sorted[((df_sorted['Attribute_Name'] == 'VatAmount1') & (df_sorted['Delta'] == True)) | (df_sorted['Attribute_Name'] == 'NetAmount1') & (df_sorted['Delta'] == True) | (df_sorted['Attribute_Name'] == 'VatRate1') & (df_sorted['Delta'] == True)]        
         unique_documentid = df_sort_new['DocumentID'].unique()
         without_vat = [x for x in merged if x not in unique_documentid]
-        
         for document_id in without_vat:
-                df_sorted = df_sort[(df_sort["DocumentID"] == document_id) & (df_sort["Delta"] == True)]     
-                #display(df_sorted)     
+                df_sorted = df_sort[(df_sort["DocumentID"] == document_id) & (df_sort["Delta"] == True)]   
+  
 
+        counter_rounding_error = 0
         wrong_documentids = []
         error_codes = []
 
         for entry in unique_documentid:
                 sorted_by_documentid = df_sort_new.loc[(df_sort_new["DocumentID"] == entry)]
-                len_sorted_by_documentid = len(sorted_by_documentid)
                 sorted_by_documentid = sorted_by_documentid.loc[(sorted_by_documentid["Attribute_Name"] == 'VatAmount1')]
+
                 if not sorted_by_documentid.empty:
                         if 0.0 < abs(float(sorted_by_documentid["Attribute_After"]) - float(sorted_by_documentid["Attribute_Before"])) <= 0.05:
                                 #print('Bei: '+entry+' Rundungsfehler')
-                                x=1
+                                counter_rounding_error += 1
 
+                        if(abs(float(sorted_by_documentid["Attribute_After"]) - float(sorted_by_documentid["Attribute_Before"]))>= 2*abs(float(sorted_by_documentid["Attribute_After"]))):
+                                error_codes.append("minus erkannt")
+                        
                 if not sorted_by_documentid.empty:
                         wrong_documentids.append(entry)
-                        error_codes.append(len_sorted_by_documentid)
+                        error_codes.append(sorted_by_documentid["Attribute_Name"])
+
+                if(counter_rounding_error>=1):
+                    error_codes.append("Rundungsfehler")
 
         return wrong_documentids, error_codes
+
 
 
 def convert_date(date_string):
@@ -576,8 +583,12 @@ def get_improvement_results():
                 count_per_group = grouped_df.size()
                 bad_documents = len(count_per_group)
                 whole_documents = df_sorted_without_vendor_bad['DocumentID'].nunique()
-                value = (x[0]/whole_documents)
-                good_documents = whole_documents-bad_documents
+                try:
+                    value = (x[0]/whole_documents)
+                    good_documents = whole_documents-bad_documents
+                except:
+                    value = pd.NA
+                
                 return value, whole_documents, x
             
 
