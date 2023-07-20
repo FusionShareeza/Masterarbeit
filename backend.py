@@ -32,10 +32,10 @@ from collections import Counter
 from collections import defaultdict
 from datetime import datetime 
 
-tenant = '000git'
+tenant = '0006in'
 path = 'data/'+tenant+''
-startdate = "'2023-07-05 09:44:23.030'"
-enddate = "'2023-07-12 08:28:20.000'"
+startdate = "'2023-06-20 09:44:23.030'"
+enddate = "'2023-07-20 08:28:20.000'"
 
 try: 
     os.mkdir(path) 
@@ -910,7 +910,7 @@ def get_vendor_results():
         return score
 
 
-def get_pos_results():
+def     get_pos_results():
     if (os.path.exists('data/'+str(tenant)+'/cclogattributes_T_'+tenant+'_reduced.csv')):
         df = pd.read_csv('data/'+str(tenant)+'/cclogattributes_T_'+tenant+'_reduced.csv', encoding='utf-8')
         df_sorted = df.sort_values(by='DocumentID')
