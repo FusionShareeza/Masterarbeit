@@ -31,6 +31,8 @@ from sqlalchemy import text
 from collections import Counter
 from collections import defaultdict
 from datetime import datetime 
+import mysql.connector
+from datetime import datetime
 
 tenant = '0006in'
 path = 'data/'+tenant+''
@@ -768,9 +770,6 @@ def get_results_from_json():
     else:
         return False
 
-
-
-
 def get_results_from_json_debitor():
     if(os.path.isfile('data/'+str(tenant)+'/results_debitor_'+str(tenant)+'_.json') == True):
         with open('data/'+str(tenant)+'/results_debitor_'+str(tenant)+'_.json') as user_file:
@@ -819,6 +818,101 @@ def get_commments_from_sollwerte():
     json_string = json.dumps(json_data, indent=4)
 
     return json_string
+
+def get_results_table():
+    db = mysql.connector.connect(user='admin', password='',
+                                host='localhost',
+                                database=tenant)
+
+    def custom_serializer(obj):
+        if isinstance(obj, datetime):
+            return obj.strftime('%Y-%m-%d %H:%M:%S')
+        raise TypeError("Type not serializable")
+
+    cursor = db.cursor()
+    sql_select_query = f"SELECT * FROM resultslog "
+
+    cursor.execute(sql_select_query,)
+
+    result = cursor.fetchall()
+
+    data_list = []
+
+    data_dict = {}
+
+    for row in result:
+        logtime_str = row[0].strftime('%Y-%m-%d %H:%M:%S')
+        data_dict[logtime_str] = {
+            'Logtime': row[0].strftime('%Y-%m-%d %H:%M:%S'),
+            'ValueMandant': row[1],
+            'ValueLieferant': row[2],
+            'ValueRechnungskopf': row[3]  # Datetime in String umwandeln
+        }
+
+    json_data = json.dumps(data_dict, default=custom_serializer)
+
+    return(json_data)
+
+
+def check_if_entry_is_there(logtime, column_name, value_to_enter):
+    try:
+        db = mysql.connector.connect(user='admin', password='',
+                                    host='localhost',
+                                    database=tenant)
+
+        cursor = db.cursor()
+
+        # SELECT-Abfrage, um nach dem Eintrag zu suchen
+        sql_select_query = f"SELECT {column_name} FROM resultslog WHERE logtime = %s"
+        data_to_search = (logtime,)
+
+        # SQL-Abfrage ausführen
+        cursor.execute(sql_select_query, data_to_search)
+
+        # Ergebnis abrufen
+        result = cursor.fetchone()
+
+        if result is not None:
+            # Eintrag vorhanden, Daten zurückgeben
+            if result[0] is not None:
+                return result[0]
+            else:
+                # Eintrag in der Spalte fehlt, in die vorhandene Zeile einfügen
+                update_query = f"UPDATE resultslog SET {column_name} = %s WHERE logtime = %s"
+                data_to_update = (value_to_enter, logtime)
+
+                # SQL-Abfrage ausführen, um den Eintrag zu aktualisieren
+                cursor.execute(update_query, data_to_update)
+
+                # Änderungen speichern
+                db.commit()
+
+                return value_to_enter
+
+        else:
+            # Eintrag nicht vorhanden, neue Zeile mit Logtime erstellen und Eintrag hinzufügen
+            sql_insert_query = f"INSERT INTO resultslog (logtime, {column_name}) VALUES (%s, %s)"
+            data_to_insert = (logtime, value_to_enter)
+
+            # SQL-Abfrage ausführen, um den neuen Eintrag hinzuzufügen
+            cursor.execute(sql_insert_query, data_to_insert)
+
+            # Änderungen speichern
+            db.commit()
+
+            return value_to_enter
+
+    except mysql.connector.Error as error:
+        # Fehlerbehandlung
+        print("Fehler beim Suchen/Hinzufügen des Eintrags: {}".format(error))
+        return None
+
+    finally:
+        # Verbindung schließen
+        cursor.close()
+        db.close()
+
+
 
 def update_csv(log, value1=None, value2=None, value3=None):
     csv_filename = 'data/'+str(tenant)+'/log_'+str(tenant)+'_.csv'
@@ -884,8 +978,9 @@ def get_debitor_results():
         value = 0
         len = 0
         value, len = get_single_value(df, 'DEBITOR_NUM')
+        check_if_entry_is_there(enddate, 'ValueMandant', value)
 
-        update_csv(enddate, value1=value)
+        #update_csv(enddate, value1=value)
 
         score = '{"score":"'+str(value)+'","frequency":"'+str(len)+'"}'
         if(value < 0.93):
@@ -901,8 +996,9 @@ def get_vendor_results():
         len = 0
         value, len = get_single_value(df, 'VENDOR_NUM')
         score = '{"score":"'+str(value)+'","frequency":"'+str(len)+'"}'
+        check_if_entry_is_there(enddate, 'ValueLieferant', value)
 
-        update_csv(enddate, value2=value)
+        #update_csv(enddate, value2=value)
 
         if(value < 0.90):
             global critical
@@ -910,7 +1006,7 @@ def get_vendor_results():
         return score
 
 
-def     get_pos_results():
+def get_pos_results():
     if (os.path.exists('data/'+str(tenant)+'/cclogattributes_T_'+tenant+'_reduced.csv')):
         df = pd.read_csv('data/'+str(tenant)+'/cclogattributes_T_'+tenant+'_reduced.csv', encoding='utf-8')
         df_sorted = df.sort_values(by='DocumentID')
@@ -922,7 +1018,8 @@ def     get_pos_results():
         bad_documents = len(count_per_group)
         whole_documents = df_sorted['DocumentID'].nunique()
         value = 1-(bad_documents/whole_documents)
-        update_csv(enddate, value3=value)
+        check_if_entry_is_there(enddate, 'ValueRechnungskopf', value)
+        #update_csv(enddate, value3=value)
 
         good_documents = whole_documents-bad_documents
         score = '{"score":"'+str(value)+'","frequency":"'+str(whole_documents)+'"}'
@@ -932,27 +1029,28 @@ def     get_pos_results():
             critical += 1
         return score
     
-def get_results_table():
-    csvFilePath = 'data/'+str(tenant)+'/log_'+str(tenant)+'_.csv'
-    jsonFilePath = 'data/'+str(tenant)+'/table_data'+str(tenant)+'_.json'
+# def get_results_table():
+#     csvFilePath = 'data/'+str(tenant)+'/log_'+str(tenant)+'_.csv'
+#     jsonFilePath = 'data/'+str(tenant)+'/table_data'+str(tenant)+'_.json'
 
-    data = {}
+#     data = {}
         
-    with open(csvFilePath, encoding='utf-8') as csvf:
-        csvReader = csv.DictReader(csvf)
+#     with open(csvFilePath, encoding='utf-8') as csvf:
+#         csvReader = csv.DictReader(csvf)
             
-        for rows in csvReader:
-            key = rows['Logtime']
-            data[key] = rows
+#         for rows in csvReader:
+#             key = rows['Logtime']
+#             data[key] = rows
 
 
-    with open(jsonFilePath, 'w', encoding='utf-8') as jsonf:
-        jsonf.write(json.dumps(data, indent=4))
+#     with open(jsonFilePath, 'w', encoding='utf-8') as jsonf:
+#         jsonf.write(json.dumps(data, indent=4))
     
-    with open('data/'+str(tenant)+'/table_data'+str(tenant)+'_.json') as user_file:
-        file_contents = user_file.read()
+#     with open('data/'+str(tenant)+'/table_data'+str(tenant)+'_.json') as user_file:
+#         file_contents = user_file.read()
 
-    return file_contents
+
+#     return file_contents
 
 def get_smart_invoice_error():
     if (os.path.exists('data/'+str(tenant)+'/cclogattributes_T_'+tenant+'_reduced.csv')):
