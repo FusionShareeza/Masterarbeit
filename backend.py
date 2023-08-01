@@ -36,21 +36,21 @@ from datetime import datetime
 
 tenant = '0006in'
 path = 'data/'+tenant+''
-startdate = "'2023-06-20 09:44:23.030'"
-enddate = "'2023-07-20 08:28:20.000'"
+startdate = "'2023-06-20 09:44:23'"
+enddate = "'2023-07-20 08:28:20'"
 
 try: 
     os.mkdir(path) 
 except: 
     print('schon da') 
 
-if(os.path.exists('data/'+str(tenant)+'/log_'+str(tenant)+'_.csv')  == True):
-    print('log da')
-else:
-    with open('data/'+str(tenant)+'/log_'+str(tenant)+'_.csv', "w", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerow(["Logtime", "ValueMandant", "ValueLieferant", "ValueRechnungskopf"])
-    print('log erstellt')
+# if(os.path.exists('data/'+str(tenant)+'/log_'+str(tenant)+'_.csv')  == True):
+#     print('log da')
+# else:
+#     with open('data/'+str(tenant)+'/log_'+str(tenant)+'_.csv', "w", newline="") as file:
+#         writer = csv.writer(file)
+#         writer.writerow(["Logtime", "ValueMandant", "ValueLieferant", "ValueRechnungskopf"])
+#     print('log erstellt')
 
 critical = -1
 
@@ -427,9 +427,14 @@ def check_for_eap_error(vendor_num, debitor, dc_sorted_df_vendor_complete):
                                 #print('Bei: '+entry+' Rundungsfehler')
                                 counter_rounding_error += 1
 
-                        if(abs(float(sorted_by_documentid["Attribute_After"]) - float(sorted_by_documentid["Attribute_Before"]))>= 2*abs(float(sorted_by_documentid["Attribute_After"]))):
+
+                        if "-" in sorted_by_documentid["Attribute_After"]:
                                 error_codes.append("minus erkannt")
-                        
+                        elif(abs(float(sorted_by_documentid["Attribute_After"]) - float(sorted_by_documentid["Attribute_Before"]))>= 2*abs(float(sorted_by_documentid["Attribute_After"]))):
+                                error_codes.append("minus erkannt")
+
+
+
                 if not sorted_by_documentid.empty:
                         wrong_documentids.append(entry)
                         error_codes.append(sorted_by_documentid["Attribute_Name"])
@@ -862,6 +867,8 @@ def check_if_entry_is_there(logtime, column_name, value_to_enter):
 
         cursor = db.cursor()
 
+        logtime = datetime.strptime(logtime, "'%Y-%m-%d %H:%M:%S'")
+        logtime = logtime.strftime("%Y-%m-%d %H:%M:%S")
         # SELECT-Abfrage, um nach dem Eintrag zu suchen
         sql_select_query = f"SELECT {column_name} FROM resultslog WHERE logtime = %s"
         data_to_search = (logtime,)
@@ -879,7 +886,7 @@ def check_if_entry_is_there(logtime, column_name, value_to_enter):
             else:
                 # Eintrag in der Spalte fehlt, in die vorhandene Zeile einfügen
                 update_query = f"UPDATE resultslog SET {column_name} = %s WHERE logtime = %s"
-                data_to_update = (value_to_enter, logtime)
+                data_to_update = (float(value_to_enter), logtime)
 
                 # SQL-Abfrage ausführen, um den Eintrag zu aktualisieren
                 cursor.execute(update_query, data_to_update)
@@ -887,12 +894,12 @@ def check_if_entry_is_there(logtime, column_name, value_to_enter):
                 # Änderungen speichern
                 db.commit()
 
-                return value_to_enter
+                return float(value_to_enter)
 
         else:
             # Eintrag nicht vorhanden, neue Zeile mit Logtime erstellen und Eintrag hinzufügen
             sql_insert_query = f"INSERT INTO resultslog (logtime, {column_name}) VALUES (%s, %s)"
-            data_to_insert = (logtime, value_to_enter)
+            data_to_insert = (logtime, float(value_to_enter))
 
             # SQL-Abfrage ausführen, um den neuen Eintrag hinzuzufügen
             cursor.execute(sql_insert_query, data_to_insert)
@@ -900,7 +907,7 @@ def check_if_entry_is_there(logtime, column_name, value_to_enter):
             # Änderungen speichern
             db.commit()
 
-            return value_to_enter
+            return float(value_to_enter)
 
     except mysql.connector.Error as error:
         # Fehlerbehandlung
